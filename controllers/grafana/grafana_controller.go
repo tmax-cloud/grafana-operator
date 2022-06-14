@@ -382,10 +382,10 @@ func CreateGrafanaUser(email string) {
 	} else {
 		defer resp.Body.Close()
 
-		respBody, _ := ioutil.ReadAll(resp.Body)
+		//respBody, _ := ioutil.ReadAll(resp.Body)
 
-		str := string(respBody)
-		klog.Info(str)
+		//str := string(respBody)
+		//klog.Info(str)
 		klog.Info(" Create Grafana User " + email + " Success ")
 	}
 }
@@ -473,55 +473,55 @@ func GetCRBAdmin() string {
 		if crb.Name == "admin" {
 			adminemail = crb.Subjects[0].Name
 			klog.Infof("admin is " + adminemail)
+			break
 		}
 	}
 	return adminemail
 }
 
 func GiveAdmin() {
-	hc_admin := "hc-admin@tmax.co.kr"
+	hc_admin := GetCRBAdmin() //"hc-admin@tmax.co.kr"
 	log.V(1).Info("Getting admin CRB")
 	if GetGrafanaUser(hc_admin) == 0 {
 		CreateGrafanaUser(hc_admin)
+		id := GetGrafanaUser(hc_admin)
+		adminBody := `{"isGrafanaAdmin": true}`
+		grafanaId, grafanaPw := "admin", "admin"
+		httpgeturl := "http://" + grafanaId + ":" + grafanaPw + "@" + constants.GrafanaMonitoringAddress + "api/admin/users/" + strconv.Itoa(id) + "/permissions"
+
+		request, _ := http.NewRequest("PUT", httpgeturl, bytes.NewBuffer([]byte(adminBody)))
+
+		request.Header.Set("Content-Type", "application/json; charset=UTF-8")
+
+		client := &http.Client{}
+		response, err := client.Do(request)
+		if err != nil {
+			klog.Errorln(err)
+
+		} else {
+			defer response.Body.Close()
+			resbody, _ := ioutil.ReadAll(response.Body)
+			logf.Log.Info(string(resbody))
+		}
+
+		//org permission
+		httpgeturlorg := "http://" + grafanaId + ":" + grafanaPw + "@" + constants.GrafanaMonitoringAddress + "api/orgs/1/users/" + strconv.Itoa(id)
+		adminorgBody := `{"role":"Admin"}`
+		request, _ = http.NewRequest("PATCH", httpgeturlorg, bytes.NewBuffer([]byte(adminorgBody)))
+		request.Header.Set("Content-Type", "application/json; charset=UTF-8")
+		//request.Header.Set("Authorization", util.GrafanaKey)
+		client2 := &http.Client{}
+		response, err = client2.Do(request)
+		if err != nil {
+			klog.Errorln(err)
+
+		} else {
+			defer response.Body.Close()
+			resbody, _ := ioutil.ReadAll(response.Body)
+
+			logf.Log.Info(string(resbody))
+		}
 	}
-	id := GetGrafanaUser(hc_admin)
-	adminBody := `{"isGrafanaAdmin": true}`
-	grafanaId, grafanaPw := "admin", "admin"
-	httpgeturl := "http://" + grafanaId + ":" + grafanaPw + "@" + constants.GrafanaMonitoringAddress + "api/admin/users/" + strconv.Itoa(id) + "/permissions"
-
-	request, _ := http.NewRequest("PUT", httpgeturl, bytes.NewBuffer([]byte(adminBody)))
-
-	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
-
-	client := &http.Client{}
-	response, err := client.Do(request)
-	if err != nil {
-		klog.Errorln(err)
-
-	} else {
-		defer response.Body.Close()
-		resbody, _ := ioutil.ReadAll(response.Body)
-		logf.Log.Info(string(resbody))
-	}
-
-	//org permission
-	httpgeturlorg := "http://" + grafanaId + ":" + grafanaPw + "@" + constants.GrafanaMonitoringAddress + "api/orgs/1/users/" + strconv.Itoa(id)
-	adminorgBody := `{"role":"Admin"}`
-	request, _ = http.NewRequest("PATCH", httpgeturlorg, bytes.NewBuffer([]byte(adminorgBody)))
-	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
-	//request.Header.Set("Authorization", util.GrafanaKey)
-	client2 := &http.Client{}
-	response, err = client2.Do(request)
-	if err != nil {
-		klog.Errorln(err)
-
-	} else {
-		defer response.Body.Close()
-		resbody, _ := ioutil.ReadAll(response.Body)
-
-		logf.Log.Info(string(resbody))
-	}
-
 }
 
 func Grafanacheck(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
