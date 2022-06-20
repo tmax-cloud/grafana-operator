@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -460,6 +461,10 @@ func GetGrafanaUser(email string) int {
 }
 
 func GetCRBAdmin() string {
+	var config *rest.Config
+	var err error
+	config, err = rest.InClusterConfig()
+	Clientset, _ = kubernetes.NewForConfig(config)
 	crbList, err := Clientset.RbacV1().ClusterRoleBindings().List(
 		context.TODO(),
 		metav1.ListOptions{},
