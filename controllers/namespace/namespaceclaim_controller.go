@@ -65,9 +65,9 @@ func (r *NamespaceReconciler) Reconcile(_ context.Context, req ctrl.Request) (ct
 	if s == "" {
 		s = namespace.Annotations["creator"]
 	}
-	log.Log.Info("user name is" + s)
+
 	model.GrafanaKey = grafana.GetGrafanaKey()
-	log.Log.Info(s)
+	//	log.Log.Info(s)
 	/*defer func() {
 		s := recover()
 		if s != nil {
@@ -75,6 +75,7 @@ func (r *NamespaceReconciler) Reconcile(_ context.Context, req ctrl.Request) (ct
 		}
 	}()*/
 	if s != "" {
+		log.Log.Info("user name is" + s)
 		grafanadashboard.CreateUserDashboard(context.TODO(), namespace.GetName(), s)
 	}
 
