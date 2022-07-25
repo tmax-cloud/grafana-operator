@@ -32,7 +32,6 @@ import (
 	"k8s.io/client-go/rest"
 
 	"k8s.io/client-go/tools/record"
-	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -383,11 +382,7 @@ func CreateGrafanaUser(email string) {
 	} else {
 		defer resp.Body.Close()
 
-		//respBody, _ := ioutil.ReadAll(resp.Body)
-
-		//str := string(respBody)
-		//klog.Info(str)
-		klog.Info(" Create Grafana User " + email + " Success ")
+		log.V(1).Info(" Create Grafana User " + email + " Success ")
 	}
 }
 func RandomString(n int) string {
@@ -431,7 +426,7 @@ func GetGrafanaKey() string {
 		model.GrafanaKey = "Bearer " + grafana_resp.Key
 
 		/////create grafana user
-		klog.Infof("start to create grafana user")
+		log.V(1).Info("start to create grafana user")
 	}
 	return model.GrafanaKey
 }
@@ -447,20 +442,19 @@ func GetGrafanaUser(email string) int {
 	resp, err := client.Do(request)
 	var GrafanaUserGet model.Grafana_User_Get
 	if err != nil {
-		klog.Errorln(err)
+		log.V(4).Error(err, "err")
 		return 0
 	} else {
 		defer resp.Body.Close()
 
 		body, _ := ioutil.ReadAll(resp.Body)
 		json.Unmarshal([]byte(body), &GrafanaUserGet)
-		klog.Infof(string(body))
-		klog.Infof(strconv.Itoa(GrafanaUserGet.Id))
 	}
 	return GrafanaUserGet.Id
 }
 
 func GetCRBAdmin() string {
+	log.V(1).Info("getting crb")
 	var config *rest.Config
 	var err error
 	config, err = rest.InClusterConfig()
@@ -469,15 +463,18 @@ func GetCRBAdmin() string {
 		context.TODO(),
 		metav1.ListOptions{},
 	)
+
+	log.V(1).Info("crb list:", crbList)
 	if crbList == nil {
-		klog.Errorln(err)
+		log.V(4).Error(err, "err")
 	}
 
 	var adminemail string
 	for _, crb := range crbList.Items {
+		log.V(1).Info(crb.Name)
 		if crb.Name == "admin" {
 			adminemail = crb.Subjects[0].Name
-			klog.Infof("admin is " + adminemail)
+			log.V(1).Info("admin is " + adminemail)
 			break
 		}
 	}
@@ -485,9 +482,11 @@ func GetCRBAdmin() string {
 }
 
 func GiveAdmin() {
-	hc_admin := GetCRBAdmin() //"hc-admin@tmax.co.kr"
+	var hc_admin string
+	hc_admin = GetCRBAdmin() //"hc-admin@tmax.co.kr"
 	log.V(1).Info("Getting admin CRB")
-	if GetGrafanaUser(hc_admin) == 0 {
+	log.V(1).Info(hc_admin)
+	if GetGrafanaUser(hc_admin) == 0 && hc_admin != "" {
 		CreateGrafanaUser(hc_admin)
 		id := GetGrafanaUser(hc_admin)
 		adminBody := `{"isGrafanaAdmin": true}`
@@ -501,12 +500,10 @@ func GiveAdmin() {
 		client := &http.Client{}
 		response, err := client.Do(request)
 		if err != nil {
-			klog.Errorln(err)
+			log.V(1).Error(err, "err")
 
 		} else {
 			defer response.Body.Close()
-			resbody, _ := ioutil.ReadAll(response.Body)
-			logf.Log.Info(string(resbody))
 		}
 
 		//org permission
@@ -518,13 +515,10 @@ func GiveAdmin() {
 		client2 := &http.Client{}
 		response, err = client2.Do(request)
 		if err != nil {
-			klog.Errorln(err)
+			log.V(1).Error(err, "err")
 
 		} else {
 			defer response.Body.Close()
-			resbody, _ := ioutil.ReadAll(response.Body)
-
-			logf.Log.Info(string(resbody))
 		}
 	}
 }
@@ -533,10 +527,10 @@ func Grafanacheck(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	reviewResponse := v1beta1.AdmissionResponse{}
 
 	g := grafanav1alpha1.Grafana{}
-	klog.Info("check grafana validate")
+	log.V(1).Info("check grafana validate")
 	err := json.Unmarshal(ar.Request.Object.Raw, &g)
 	if err == nil {
-		klog.Info(ar)
+		log.V(1).Info(ar.String())
 		label := g.GetObjectMeta().GetLabels()
 		if g.GetNamespace() != "monitoring" || label["grafana"] != "hypercloud" {
 			return &v1beta1.AdmissionResponse{

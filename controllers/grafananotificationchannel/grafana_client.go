@@ -20,12 +20,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/go-logr/logr"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/go-logr/logr"
 )
 
 const (
@@ -156,7 +157,7 @@ func (r *GrafanaClientImpl) doRequest(op string, channel []byte, UID string) (Gr
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			r.logger.Error(err, "failed to close body")
+			r.logger.V(4).Error(err, "failed to close body")
 			return
 		}
 	}(resp.Body)

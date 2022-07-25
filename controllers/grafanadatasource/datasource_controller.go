@@ -76,7 +76,7 @@ func (r *GrafanaDatasourceReconciler) Reconcile(ctx context.Context, request ctr
 	}
 
 	if currentState.KnownDataSources == nil {
-		log.Info("no datasources configmap found")
+		log.V(1).Info("no datasources configmap found")
 		return reconcile.Result{Requeue: false}, nil
 	}
 
@@ -118,7 +118,7 @@ func (r *GrafanaDatasourceReconciler) reconcileDataSources(state *common.DataSou
 
 	// apply dataSourcesToDelete
 	for _, ds := range dataSourcesToDelete {
-		log.Info("deleting datasource", "datasource", ds)
+		log.V(1).Info("deleting datasource", "datasource", ds)
 		if state.KnownDataSources.Data != nil {
 			delete(state.KnownDataSources.Data, ds)
 		}
@@ -210,7 +210,7 @@ func (r *GrafanaDatasourceReconciler) manageError(datasource *grafanav1alpha1.Gr
 		if k8serrors.IsConflict(err) {
 			return
 		}
-		log.Error(err, "error updating datasource status")
+		log.V(4).Error(err, "error updating datasource status")
 	}
 }
 
@@ -218,7 +218,7 @@ func (r *GrafanaDatasourceReconciler) manageError(datasource *grafanav1alpha1.Gr
 // is updated
 func (r *GrafanaDatasourceReconciler) manageSuccess(datasources []grafanav1alpha1.GrafanaDataSource) {
 	for i, datasource := range datasources {
-		log.Info("datasource successfully imported",
+		log.V(1).Info("datasource successfully imported",
 			"datasource.Namespace", datasource.Namespace,
 			"datasource.Name", datasource.Name)
 

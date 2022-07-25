@@ -8,6 +8,7 @@ import (
 
 	grafanav1alpha1 "github.com/grafana-operator/grafana-operator/v4/api/integreatly/v1alpha1"
 	"github.com/grafana-operator/grafana-operator/v4/controllers/config"
+	"k8s.io/klog/v2"
 )
 
 type PluginsHelperImpl struct {
@@ -85,7 +86,7 @@ func (h *PluginsHelperImpl) FilterPlugins(cr *grafanav1alpha1.Grafana, requested
 	// Try to pick the latest versions of all plugins
 	requested, err := h.pickLatestVersions(requested)
 	if err != nil {
-		log.Error(err, "unable to pick latest plugin versions")
+		klog.V(1).Error(err, "unable to pick latest plugin versions")
 	}
 
 	// Remove all plugins
@@ -97,7 +98,7 @@ func (h *PluginsHelperImpl) FilterPlugins(cr *grafanav1alpha1.Grafana, requested
 		// Don't allow to install multiple versions of the same plugin
 		if filteredPlugins.HasSomeVersionOf(&requested[i]) {
 			installedVersion := filteredPlugins.GetInstalledVersionOf(&requested[i])
-			log.V(1).Info(fmt.Sprintf("not installing version %s of %s because %s is already installed", requested[i].Version, requested[i].Name, installedVersion.Version))
+			klog.V(1).Info(fmt.Sprintf("not installing version %s of %s because %s is already installed", requested[i].Version, requested[i].Name, installedVersion.Version))
 			continue
 		}
 
@@ -115,7 +116,7 @@ func (h *PluginsHelperImpl) FilterPlugins(cr *grafanav1alpha1.Grafana, requested
 		// New plugin
 		if !cr.Status.InstalledPlugins.HasSomeVersionOf(&requested[i]) {
 			filteredPlugins = append(filteredPlugins, requested[i])
-			log.V(1).Info(fmt.Sprintf("installing plugin %s@%s", requested[i].Name, requested[i].Version))
+			klog.V(1).Info(fmt.Sprintf("installing plugin %s@%s", requested[i].Name, requested[i].Version))
 			pluginsUpdated = true
 			continue
 		}
@@ -130,7 +131,7 @@ func (h *PluginsHelperImpl) FilterPlugins(cr *grafanav1alpha1.Grafana, requested
 			requested.VersionsOf(&requested[i]) == 1 {
 			installedVersion := cr.Status.InstalledPlugins.GetInstalledVersionOf(&requested[i])
 			filteredPlugins = append(filteredPlugins, requested[i])
-			log.V(1).Info(fmt.Sprintf("changing version of plugin %s form %s to %s", requested[i].Name, installedVersion.Version, requested[i].Version))
+			klog.V(1).Info(fmt.Sprintf("changing version of plugin %s form %s to %s", requested[i].Name, installedVersion.Version, requested[i].Version))
 			pluginsUpdated = true
 			continue
 		}

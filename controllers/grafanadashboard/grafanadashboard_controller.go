@@ -49,7 +49,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -99,7 +98,7 @@ func (r *GrafanaDashboardReconciler) Reconcile(ctx context.Context, request ctrl
 
 	// If Grafana is not running there is no need to continue
 	if !r.state.GrafanaReady {
-		logger.Info("no grafana instance available")
+		logger.V(1).Info("no grafana instance available")
 		return reconcile.Result{Requeue: false}, nil
 	}
 
@@ -125,7 +124,7 @@ func (r *GrafanaDashboardReconciler) Reconcile(ctx context.Context, request ctrl
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			// If some dashboard has been deleted, then always re sync the world
-			logger.Info("deleting dashboard", "namespace", request.Namespace, "name", request.Name)
+			logger.V(1).Info("deleting dashboard", "namespace", request.Namespace, "name", request.Name)
 			return r.reconcileDashboards(request, getClient)
 		}
 		// Error reading the object - requeue the request.
@@ -181,7 +180,7 @@ func SetupWithManager(mgr ctrl.Manager, r reconcile.Reconciler, namespace string
 	// Watch for changes to primary resource GrafanaDashboard
 	err = c.Watch(&source.Kind{Type: &grafanav1alpha1.GrafanaDashboard{}}, &handler.EnqueueRequestForObject{})
 	if err == nil {
-		log.Log.Info("Starting dashboard controller")
+		log.Log.V(1).Info("Starting dashboard controller")
 	}
 
 	ref := r.(*GrafanaDashboardReconciler) // nolint
@@ -201,7 +200,7 @@ func SetupWithManager(mgr ctrl.Manager, r reconcile.Reconciler, namespace string
 
 	go func() {
 		for range ticker.C {
-			log.Log.Info("running periodic dashboard resync")
+			log.Log.V(1).Info("running periodic dashboard resync")
 			sendEmptyRequest()
 		}
 	}()
@@ -279,11 +278,11 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 	for i, dashboard := range namespaceDashboards.Items {
 		// Is this a dashboard we care about (matches the label selectors)?
 		if !r.isMatch(&namespaceDashboards.Items[i]) {
-			log.Log.Info("dashboard found but selectors do not match",
+			log.Log.V(1).Info("dashboard found but selectors do not match",
 				"namespace", dashboard.Namespace, "name", dashboard.Name)
 			continue
 		}
-		//log.Log.Info(namespaceDashboards.Items[i].ObjectMeta.GetAnnotations()["userId"])
+		//log.Log.V(1).Info(namespaceDashboards.Items[i].ObjectMeta.GetAnnotations()["userId"])
 
 		folderName := dashboard.Namespace
 		if dashboard.Spec.CustomFolderName != "" {
@@ -293,7 +292,7 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 		folder, err := grafanaClient.CreateOrUpdateFolder(folderName)
 
 		if err != nil {
-			log.Log.Error(err, "failed to get or create namespace folder for dashboard", "folder", folderName, "dashboard", request.Name)
+			log.Log.V(4).Error(err, "failed to get or create namespace folder for dashboard", "folder", folderName, "dashboard", request.Name)
 			r.manageError(&namespaceDashboards.Items[i], err)
 			continue
 		}
@@ -316,15 +315,15 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 		if knownUid != "" {
 			response, err := grafanaClient.GetDashboard(knownUid)
 			if err != nil {
-				log.Log.Error(err, "Failed to search Grafana for dashboard")
+				log.Log.V(4).Error(err, "Failed to search Grafana for dashboard")
 			}
 
 			if *response.Dashboard.ID == uint(0) {
-				log.Log.Info(fmt.Sprintf("Dashboard %v has been deleted via grafana console. Recreating.", namespaceDashboards.Items[i].ObjectMeta.Name))
+				log.Log.V(1).Info(fmt.Sprintf("Dashboard %v has been deleted via grafana console. Recreating.", namespaceDashboards.Items[i].ObjectMeta.Name))
 				processed, err = pipeline.ProcessDashboard(knownHash, &folderId, folderName, true)
 
 				if err != nil {
-					log.Log.Error(err, "cannot process dashboard", "namespace", dashboard.Namespace, "name", dashboard.Name)
+					log.Log.V(4).Error(err, "cannot process dashboard", "namespace", dashboard.Namespace, "name", dashboard.Name)
 					r.manageError(&namespaceDashboards.Items[i], err)
 					continue
 				}
@@ -332,7 +331,7 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 		}
 
 		if err != nil {
-			log.Log.Error(err, "cannot process dashboard", "namespace", dashboard.Namespace, "name", dashboard.Name)
+			log.Log.V(4).Error(err, "cannot process dashboard", "namespace", dashboard.Namespace, "name", dashboard.Name)
 			r.manageError(&namespaceDashboards.Items[i], err)
 			continue
 		}
@@ -350,15 +349,14 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 			}
 
 			if !matchesNamespaceLabels {
-				log.Log.Info("dashboard %v skipped because the namespace labels do not match", "dashboard", dashboard.Name)
+				log.Log.V(1).Info("dashboard %v skipped because the namespace labels do not match", "dashboard", dashboard.Name)
 				continue
 			}
 		}
 
 		_, err = grafanaClient.CreateOrUpdateDashboard(processed, folderId, folderName)
 		if err != nil {
-			//log.Log.Error(err, "cannot submit dashboard %v/%v", "namespace", dashboard.Namespace, "name", dashboard.Name)
-			klog.Info(folderName)
+			log.Log.V(1).Info(folderName)
 			r.manageError(&namespaceDashboards.Items[i], err)
 
 			continue
@@ -370,13 +368,13 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 	for _, dashboard := range dashboardsToDelete {
 		status, err := grafanaClient.DeleteDashboardByUID(dashboard.UID)
 		if err != nil {
-			log.Log.Error(err, "error deleting dashboard, status was",
+			log.Log.V(4).Error(err, "error deleting dashboard, status was",
 				"dashboardUID", dashboard.UID,
 				"status.Status", *status.Status,
 				"status.Message", *status.Message)
 		}
 
-		log.Log.Info(fmt.Sprintf("delete result was %v", *status.Message))
+		log.Log.V(1).Info(fmt.Sprintf("delete result was %v", *status.Message))
 
 		r.config.RemovePluginsFor(dashboard.Namespace, dashboard.Name)
 		r.config.RemoveDashboard(dashboard.UID)
@@ -391,11 +389,11 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 		// Check for empty managed folders (namespace-named) and delete obsolete ones
 		if dashboard.FolderName == "" || dashboard.FolderName == dashboard.Namespace {
 			if safe := grafanaClient.SafeToDelete(knownDashboards, dashboard.FolderId); !safe {
-				log.Log.Info("folder cannot be deleted as it's being used by other dashboards")
+				log.Log.V(1).Info("folder cannot be deleted as it's being used by other dashboards")
 				break
 			}
 			if err = grafanaClient.DeleteFolder(dashboard.FolderId); err != nil {
-				log.Log.Error(err, "delete dashboard folder failed", "dashboard.folderId", *dashboard.FolderId)
+				log.Log.V(4).Error(err, "delete dashboard folder failed", "dashboard.folderId", *dashboard.FolderId)
 			}
 		}
 	}
@@ -433,7 +431,7 @@ func (r *GrafanaDashboardReconciler) isMatch(item *grafanav1alpha1.GrafanaDashbo
 
 	match, err := item.MatchesSelectors(r.state.DashboardSelectors)
 	if err != nil {
-		log.Log.Error(err, "error matching selectors",
+		log.Log.V(4).Error(err, "error matching selectors",
 			"item.Namespace", item.Namespace,
 			"item.Name", item.Name)
 		return false
@@ -467,7 +465,7 @@ func (r *GrafanaDashboardReconciler) manageSuccess(dashboard *grafanav1alpha1.Gr
 		dashboard.Namespace,
 		dashboard.Name)
 	r.recorder.Event(dashboard, "Normal", "Success", msg)
-	log.Log.Info("dashboard successfully submitted", "name", dashboard.Name, "namespace", dashboard.Namespace)
+	log.Log.V(1).Info("dashboard successfully submitted", "name", dashboard.Name, "namespace", dashboard.Namespace)
 	r.config.AddDashboard(dashboard, folderId, folderName)
 	r.config.SetPluginsFor(dashboard)
 
@@ -475,8 +473,7 @@ func (r *GrafanaDashboardReconciler) manageSuccess(dashboard *grafanav1alpha1.Gr
 	userlist := strings.Split(dashboard.GetAnnotations()["userId"], ",")
 	var userIdList []int
 
-	log.Log.Info("dashboard UID: " + dashboard.UID())
-	klog.Infoln(userlist1)
+	log.Log.V(1).Info("dashboard UID: " + dashboard.UID())
 
 	dashboardId := GetGrafanaDashboardId(dashboard.UID())
 	if userlist[0] == "" {
@@ -484,7 +481,7 @@ func (r *GrafanaDashboardReconciler) manageSuccess(dashboard *grafanav1alpha1.Gr
 	}
 	for _, user := range userlist {
 		//user_tmp := strings.Trim(user, " ")
-		log.Log.Info("dashboard is owned by " + user)
+		log.Log.V(1).Info("dashboard is owned by " + user)
 		var response int
 
 		response = grafana.GetGrafanaUser(user)
@@ -504,7 +501,7 @@ func (r *GrafanaDashboardReconciler) manageSuccess(dashboard *grafanav1alpha1.Gr
 		userIdList = append(userIdList, response)
 
 	}
-	log.Log.Info("Start to give grafana permission")
+	log.Log.V(1).Info("Start to give grafana permission")
 	r.CreateGrafanaPermission(userIdList, dashboardId, folderName, grafanaClient)
 
 }
@@ -517,15 +514,15 @@ func GetGrafanaDashboardId(uid string) int {
 	resp, err := client.Do(request)
 	var GrafanaDashboardGet model.Grafana_Dashboad_resp
 	if err != nil {
-		klog.Errorln(err)
+		log.Log.V(4).Error(err, "fail to get grafana dashboard id")
 		return 0
 	} else {
 		defer resp.Body.Close()
 
 		body, _ := ioutil.ReadAll(resp.Body)
 		json.Unmarshal([]byte(body), &GrafanaDashboardGet)
-		//klog.Infof(string(body))
-		//klog.Infof(strconv.Itoa(GrafanaDashboardGet.Dashboard.Id))
+		//log.Log.V(1).Infof(string(body))
+		//log.Log.V(1).Infof(strconv.Itoa(GrafanaDashboardGet.Dashboard.Id))
 	}
 	return GrafanaDashboardGet.Dashboard.Id
 }
@@ -537,7 +534,7 @@ func (r *GrafanaDashboardReconciler) manageError(dashboard *grafanav1alpha1.Graf
 	if k8serrors.IsConflict(issue) || k8serrors.IsServiceUnavailable(issue) {
 		return
 	}
-	log.Log.Error(issue, "error updating dashboard")
+	log.Log.V(4).Error(issue, "error updating dashboard")
 }
 
 func (r *GrafanaDashboardReconciler) SetupWithManager(mgr manager.Manager) error {
@@ -552,7 +549,7 @@ var grafanaPw string
 func (r *GrafanaDashboardReconciler) CreateGrafanaPermission(userIdList []int, dashboardId int, folderName string, grafanaClient GrafanaClient) {
 
 	// get grafana api key
-	log.Log.Info(strconv.Itoa(userIdList[0]) + "start to give permission")
+	log.Log.V(1).Info(strconv.Itoa(userIdList[0]) + "start to give permission")
 	//grafanaClient, err := r.getClient()
 
 	folderlist, _ := grafanaClient.getAllFolders()
@@ -560,7 +557,7 @@ func (r *GrafanaDashboardReconciler) CreateGrafanaPermission(userIdList []int, d
 	for _, folder := range folderlist {
 		if folder.Title == folderName {
 			fuid = folder.UID
-			klog.Info("folder uid is " + fuid)
+			log.Log.V(1).Info("folder uid is " + fuid)
 		}
 	}
 	model.GrafanaKey = grafana.GetGrafanaKey()
@@ -584,7 +581,7 @@ func (r *GrafanaDashboardReconciler) CreateGrafanaPermission(userIdList []int, d
 	permBody = permBody + `
 			]
 		}`
-	log.Log.Info(permBody)
+	log.Log.V(1).Info(permBody)
 
 	request, _ := http.NewRequest("POST", httpposturl_per, bytes.NewBuffer([]byte(permBody)))
 
@@ -593,12 +590,12 @@ func (r *GrafanaDashboardReconciler) CreateGrafanaPermission(userIdList []int, d
 	client := &http.Client{}
 	response, err := client.Do(request)
 	if err != nil {
-		klog.Errorln(err)
+		log.Log.V(4).Error(err, "err")
 		return
 	} else {
 		defer response.Body.Close()
 		resbody, _ := ioutil.ReadAll(response.Body)
-		klog.Infof(string(resbody))
+		log.Log.V(1).Info(string(resbody))
 	}
 }
 
@@ -631,32 +628,11 @@ func CreateUserDashboard(ctx context.Context, namespace string, user string) (re
 	v.SetAnnotations(anno)
 
 	result = &v1alpha1.GrafanaDashboard{}
-	log.Log.Info("creating user NS Dashboard...")
+	log.Log.V(1).Info("creating user NS Dashboard...")
 
 	if err != nil {
 		panic(err)
 	}
-	/*grafanav1alpha1.AddToScheme(scheme.Scheme)
-	var config *rest.Config
-
-	config, err = rest.InClusterConfig()
-
-	crdConfig := *config
-	crdConfig.ContentConfig.GroupVersion = &schema.GroupVersion{Group: grafanav1alpha1.GroupVersion.Group, Version: grafanav1alpha1.GroupVersion.Version}
-	crdConfig.APIPath = "/apis"
-	crdConfig.NegotiatedSerializer = serializer.NewCodecFactory(scheme.Scheme)
-	crdConfig.UserAgent = rest.DefaultKubernetesUserAgent()
-	Clientset, _ := kubernetes.NewForConfig(config)
-
-
-	data, err := Clientset.RESTClient().Post().
-		Namespace(namespace).
-		Resource("grafanadashboards").
-		Body(v).
-		DoRaw(context.TODO())
-	log.Log.Info(string(data))
-	log.Log.Info(err.Error())
-	*/
 
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -676,9 +652,8 @@ func CreateUserDashboard(ctx context.Context, namespace string, user string) (re
 		Body(body).
 		Do(ctx).
 		Into(result)
-	//klog.Infoln(result)
 	if err != nil {
-		klog.Infoln(err.Error())
+		log.Log.V(4).Error(err, "fail to create dashboard")
 	}
 	return
 }

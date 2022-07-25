@@ -100,7 +100,7 @@ func SetupWithManager(mgr ctrl.Manager, r reconcile.Reconciler, namespace string
 	// Watch for changes to primary resource GrafanaNotificationChannel
 	err = c.Watch(&source.Kind{Type: &grafanav1alpha1.GrafanaNotificationChannel{}}, &handler.EnqueueRequestForObject{})
 	if err == nil {
-		log.Log.Info("Starting notificationchannel controller")
+		log.Log.V(1).Info("Starting notificationchannel controller")
 	}
 
 	var ref = r.(*GrafanaNotificationChannelReconciler)
@@ -120,7 +120,7 @@ func SetupWithManager(mgr ctrl.Manager, r reconcile.Reconciler, namespace string
 
 	go func() {
 		for range ticker.C {
-			log.Log.Info("running periodic notificationchannel resync")
+			log.Log.V(1).Info("running periodic notificationchannel resync")
 			sendEmptyRequest()
 		}
 	}()
@@ -158,7 +158,7 @@ func (r *GrafanaNotificationChannelReconciler) Reconcile(context context.Context
 
 	// If Grafana is not running there is no need to continue
 	if !r.state.GrafanaReady {
-		logger.Info("no grafana instance available")
+		logger.V(1).Info("no grafana instance available")
 		return reconcile.Result{Requeue: false}, nil
 	}
 
@@ -185,7 +185,7 @@ func (r *GrafanaNotificationChannelReconciler) Reconcile(context context.Context
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// If some notificationchannel has been deleted, then always re sync the world
-			logger.Info(fmt.Sprintf("deleting notificationchannel %v/%v", request.Namespace, request.Name))
+			logger.V(1).Info(fmt.Sprintf("deleting notificationchannel %v/%v", request.Namespace, request.Name))
 			return r.reconcileNotificationChannels(request, grafanaClient)
 		}
 		// Error reading the object - requeue the request.
@@ -195,7 +195,7 @@ func (r *GrafanaNotificationChannelReconciler) Reconcile(context context.Context
 	// If the notificationchannel does not match the label selectors then we ignore it
 	cr := instance.DeepCopy()
 	if !r.isMatch(cr) {
-		logger.Info(fmt.Sprintf("notificationchannel %v/%v found but selectors do not match",
+		logger.V(1).Info(fmt.Sprintf("notificationchannel %v/%v found but selectors do not match",
 			cr.Namespace, cr.Name))
 		return reconcile.Result{}, nil
 	}
@@ -250,7 +250,7 @@ func (r *GrafanaNotificationChannelReconciler) reconcileNotificationChannels(req
 	for index, notificationchannel := range namespaceNotificationChannels.Items {
 		// Is this a notificationchannel we care about (matches the label selectors)?
 		if !r.isMatch(&namespaceNotificationChannels.Items[index]) {
-			r.Log.Info(fmt.Sprintf("notificationchannel %v/%v found but selectors do not match",
+			r.Log.V(1).Info(fmt.Sprintf("notificationchannel %v/%v found but selectors do not match",
 				notificationchannel.Namespace, notificationchannel.Name))
 			continue
 		}
@@ -261,7 +261,7 @@ func (r *GrafanaNotificationChannelReconciler) reconcileNotificationChannels(req
 		pipeline := NewNotificationChannelPipeline(r.client, &namespaceNotificationChannels.Items[index])
 		processed, err := pipeline.ProcessNotificationChannel(knownHash)
 		if err != nil {
-			r.Log.Error(err, fmt.Sprintf("cannot process notificationchannel %v/%v", notificationchannel.Namespace, notificationchannel.Name))
+			r.Log.V(4).Error(err, fmt.Sprintf("cannot process notificationchannel %v/%v", notificationchannel.Namespace, notificationchannel.Name))
 			r.manageError(&namespaceNotificationChannels.Items[index], err)
 			continue
 		}
@@ -283,7 +283,7 @@ func (r *GrafanaNotificationChannelReconciler) reconcileNotificationChannels(req
 			status, err = client.UpdateNotificationChannel(processed, *rawJson.UID)
 		}
 		if err != nil {
-			r.Log.Info(fmt.Sprintf("cannot submit notificationchannel %v/%v", notificationchannel.Namespace, notificationchannel.Name))
+			r.Log.V(1).Info(fmt.Sprintf("cannot submit notificationchannel %v/%v", notificationchannel.Namespace, notificationchannel.Name))
 			r.manageError(&namespaceNotificationChannels.Items[index], err)
 			continue
 		}
@@ -297,12 +297,12 @@ func (r *GrafanaNotificationChannelReconciler) reconcileNotificationChannels(req
 	for _, notificationchannel := range notificationchannelsToDelete {
 		status, err := client.DeleteNotificationChannelByUID(notificationchannel.UID)
 		if err != nil {
-			r.Log.Error(err, fmt.Sprintf("error deleting notificationchannel %v, status was %v/%v",
+			r.Log.V(4).Error(err, fmt.Sprintf("error deleting notificationchannel %v, status was %v/%v",
 				notificationchannel.UID,
 				*status.Message,
 				*status.UID))
 		}
-		r.Log.Info(fmt.Sprintf("delete result was %v", *status.UID))
+		r.Log.V(1).Info(fmt.Sprintf("delete result was %v", *status.UID))
 		r.config.RemoveNotificationChannel(notificationchannel.Namespace, notificationchannel.Name)
 	}
 
@@ -320,7 +320,7 @@ func (r *GrafanaNotificationChannelReconciler) manageSuccess(notificationchannel
 		notificationchannel.Name)
 
 	r.recorder.Event(notificationchannel, "Normal", "Success", msg)
-	r.Log.Info(msg)
+	r.Log.V(1).Info(msg)
 
 	notificationchannel.Status.UID = *status.UID
 	notificationchannel.Status.ID = *status.ID
@@ -345,7 +345,7 @@ func (r *GrafanaNotificationChannelReconciler) manageError(notificationchannel *
 		if errors.IsConflict(err) {
 			return
 		}
-		r.Log.Error(err, "error updating notificationchannel status")
+		r.Log.V(4).Error(err, "error updating notificationchannel status")
 	}
 }
 
@@ -379,7 +379,7 @@ func (r *GrafanaNotificationChannelReconciler) isMatch(item *grafanav1alpha1.Gra
 
 	match, err := item.MatchesSelectors(r.state.DashboardSelectors)
 	if err != nil {
-		r.Log.Error(err, fmt.Sprintf("error matching selectors against %v/%v",
+		r.Log.V(4).Error(err, fmt.Sprintf("error matching selectors against %v/%v",
 			item.Namespace,
 			item.Name))
 		return false

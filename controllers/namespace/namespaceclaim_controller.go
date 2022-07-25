@@ -25,8 +25,8 @@ import (
 	"github.com/grafana-operator/grafana-operator/v4/controllers/grafanadashboard"
 	"github.com/grafana-operator/grafana-operator/v4/controllers/model"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -50,15 +50,15 @@ func (r *NamespaceReconciler) Reconcile(_ context.Context, req ctrl.Request) (ct
 	_ = context.Background()
 
 	// your logic here
-	log.Log.Info("Reconciling Namespace")
+	klog.V(4).Info("Reconciling Namespace")
 	namespace := &v1.Namespace{}
 
 	if err := r.Get(context.TODO(), req.NamespacedName, namespace); err != nil {
 		if errors.IsNotFound(err) {
-			log.Log.Info("Namespace resource not found. Ignoring since object must be deleted.")
+			klog.V(4).Info("Namespace resource not found. Ignoring since object must be deleted.")
 			return ctrl.Result{}, nil
 		}
-		log.Log.Error(err, "Failed to get Namespace")
+		klog.V(1).Error(err, "Failed to get Namespace")
 		return ctrl.Result{}, err
 	}
 	s := namespace.Annotations["owner"]
@@ -67,7 +67,7 @@ func (r *NamespaceReconciler) Reconcile(_ context.Context, req ctrl.Request) (ct
 	}
 
 	model.GrafanaKey = grafana.GetGrafanaKey()
-	//	log.Log.Info(s)
+	//	klog.V(4).Info(s)
 	/*defer func() {
 		s := recover()
 		if s != nil {
@@ -75,7 +75,7 @@ func (r *NamespaceReconciler) Reconcile(_ context.Context, req ctrl.Request) (ct
 		}
 	}()*/
 	if s != "" {
-		log.Log.Info("user name is" + s)
+		klog.V(4).Info("user name is" + s)
 		grafanadashboard.CreateUserDashboard(context.TODO(), namespace.GetName(), s)
 	}
 
