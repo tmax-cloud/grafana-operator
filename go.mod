@@ -1,4 +1,4 @@
-module github.com/grafana-operator/grafana-operator/v4
+module github.com/tmax-cloud/grafana-operator
 
 go 1.16
 
