@@ -44,7 +44,6 @@ import (
 	"github.com/operator-framework/operator-lib/leader"
 	"k8s.io/api/admission/v1beta1"
 	"k8s.io/client-go/rest"
-	"k8s.io/klog/v2"
 	k8sconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -85,10 +84,10 @@ func init() {
 }
 
 func printVersion() {
-	log.Log.Info(fmt.Sprintf("Go Version: %s", runtime.Version()))
-	log.Log.Info(fmt.Sprintf("Go OS/Arch: %s/%s", runtime.GOOS, runtime.GOARCH))
-	log.Log.Info(fmt.Sprintf("operator-sdk Version: %v", "v1.3.0"))
-	log.Log.Info(fmt.Sprintf("operator Version: %v", version.Version))
+	log.Log.V(1).Info(fmt.Sprintf("Go Version: %s", runtime.Version()))
+	log.Log.V(1).Info(fmt.Sprintf("Go OS/Arch: %s/%s", runtime.GOOS, runtime.GOARCH))
+	log.Log.V(1).Info(fmt.Sprintf("operator-sdk Version: %v", "v1.3.0"))
+	log.Log.V(1).Info(fmt.Sprintf("operator Version: %v", version.Version))
 }
 
 func assignOpts() {
@@ -132,7 +131,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 	}
 	contentType := r.Header.Get("Content-Type")
 	if contentType != "application/json" {
-		klog.Errorf("contentType=%s, expect application/json", contentType)
+		log.Log.V(4).Info("contentType=" + contentType + "expect application/json")
 		return
 	}
 
@@ -140,7 +139,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 	responseAdmissionReview := v1beta1.AdmissionReview{}
 
 	if err := json.Unmarshal(body, &requestedAdmissionReview); err != nil {
-		klog.Error(err)
+		log.Log.V(4).Error(err, "fail unmarshal")
 		responseAdmissionReview.Response = &v1beta1.AdmissionResponse{
 			Allowed: false,
 		}
@@ -152,16 +151,14 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 
 	respBytes, err := json.Marshal(responseAdmissionReview)
 
-	//klog.Infof("Response body: %s\n", respBytes)
-
 	if err != nil {
-		klog.Error(err)
+		log.Log.V(4).Error(err, "fail admission validate")
 		responseAdmissionReview.Response = &v1beta1.AdmissionResponse{
 			Allowed: false,
 		}
 	}
 	if _, err := w.Write(respBytes); err != nil {
-		klog.Error(err)
+		log.Log.V(4).Error(err, "fail admission validate")
 		responseAdmissionReview.Response = &v1beta1.AdmissionResponse{
 			Allowed: false,
 		}
@@ -169,7 +166,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 }
 
 func serveGrafana(w http.ResponseWriter, r *http.Request) {
-	klog.Infof("Http request: method=%s, uri=%s", r.Method, r.URL.Path)
+	log.Log.V(1).Info("Http request: method=%s, uri=%s", r.Method, r.URL.Path)
 	serve(w, r, grafana.Grafanacheck)
 }
 func main() { // nolint
@@ -181,7 +178,7 @@ func main() { // nolint
 	flag.StringVar(&keyFile, "keyFile", "/run/secrets/tls/tls.key", "x509 Private key file for TLS connection")
 	namespace, err := k8sutil.GetWatchNamespace()
 	if err != nil {
-		log.Log.Error(err, "failed to get watch namespace")
+		log.Log.V(4).Error(err, "failed to get watch namespace")
 		os.Exit(1)
 	}
 
@@ -195,7 +192,7 @@ func main() { // nolint
 		LeaderElectionID:       "2c0156f0.integreatly.org",
 	})
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.V(4).Error(err, "unable to start manager")
 		os.Exit(1)
 	}
 
@@ -208,7 +205,7 @@ func main() { // nolint
 	mux.HandleFunc("/validate", serveGrafana)
 	keyPair, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		klog.Errorf("Failed to load key pair: %s", err)
+		log.Log.V(4).Error(err, "Failed to load key pair")
 	}
 
 	whsvr := &http.Server{
@@ -216,10 +213,10 @@ func main() { // nolint
 		Handler:   mux,
 		TLSConfig: &tls.Config{Certificates: []tls.Certificate{keyPair}},
 	}
-	klog.Info("start webhook")
+	log.Log.V(1).Info("start webhook")
 	go func() {
 		if err := whsvr.ListenAndServeTLS("", ""); err != nil {
-			klog.Errorf("Failed to listen and serve grafana-operator: %s", err)
+			log.Log.V(4).Error(err, "Failed to listen and serve grafana-operator")
 		}
 	}()
 	// Controller configuration
@@ -238,7 +235,7 @@ func main() { // nolint
 	var dashboardNamespaces = []string{namespace}
 	if scanAll {
 		dashboardNamespaces = []string{""}
-		log.Log.Info("Scanning for dashboards in all namespaces")
+		log.Log.V(1).Info("Scanning for dashboards in all namespaces")
 	}
 
 	if flagNamespaces != "" {
@@ -247,28 +244,28 @@ func main() { // nolint
 			fmt.Fprint(os.Stderr, "--namespaces provided but no valid namespaces in list")
 			os.Exit(1)
 		}
-		log.Log.Info(fmt.Sprintf("Scanning for dashboards in the following namespaces: [%s]", strings.Join(dashboardNamespaces, ",")))
+		log.Log.V(1).Info(fmt.Sprintf("Scanning for dashboards in the following namespaces: [%s]", strings.Join(dashboardNamespaces, ",")))
 	}
 
 	// Get a config to talk to the apiserver
 	cfg, err := k8sconfig.GetConfig()
 	if err != nil {
-		log.Log.Error(err, "")
+		log.Log.V(4).Error(err, "")
 		os.Exit(1)
 	}
 
 	// Become the leader before proceeding
 	err = leader.Become(context.TODO(), "grafana-operator-lock")
 	if err != nil {
-		log.Log.Error(err, "")
+		log.Log.V(4).Error(err, "")
 	}
 
-	log.Log.Info("Registering Components.")
+	log.Log.V(1).Info("Registering Components.")
 
 	// Starting the resource auto-detection for the grafana controller
 	autodetect, err := common.NewAutoDetect(mgr)
 	if err != nil {
-		log.Log.Error(err, "failed to start the background process to auto-detect the operator capabilities")
+		log.Log.V(4).Error(err, "failed to start the background process to auto-detect the operator capabilities")
 	} else {
 		autodetect.Start()
 		defer autodetect.Stop()
@@ -276,28 +273,29 @@ func main() { // nolint
 
 	// Setup Scheme for all resources
 	if err := apis.AddToScheme(mgr.GetScheme()); err != nil {
-		log.Log.Error(err, "")
+		log.Log.V(4).Error(err, "")
 		os.Exit(1)
 	}
 
 	// Setup Scheme for OpenShift routes
 	if err := routev1.AddToScheme(mgr.GetScheme()); err != nil {
-		log.Log.Error(err, "")
+		log.Log.V(4).Error(err, "")
 		os.Exit(1)
 	}
 
 	if err != nil {
-		log.Log.Error(err, "error starting metrics service")
+		log.Log.V(4).Error(err, "error starting metrics service")
 	}
 
-	log.Log.Info("Starting the Cmd.")
+	log.Log.V(1).Info("Starting the Cmd.")
 
 	// Start one dashboard controller per watch namespace
 	for _, ns := range dashboardNamespaces {
 		startDashboardController(ns, cfg, context.Background())
 		startNotificationChannelController(ns, cfg, context.Background())
-	}
 
+	}
+	//startDatasourceController("monitoring", cfg, context.Background())
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
 	if err = (&grafana.ReconcileGrafana{
@@ -309,7 +307,7 @@ func main() { // nolint
 		Config:   grafanaconfig.GetControllerConfig(),
 		Recorder: mgr.GetEventRecorderFor("GrafanaDashboard"),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Grafana")
+		setupLog.V(4).Error(err, "unable to create controller", "controller", "Grafana")
 		os.Exit(1)
 	}
 	if err = (&grafanadashboard.GrafanaDashboardReconciler{
@@ -317,16 +315,15 @@ func main() { // nolint
 		Log:    ctrl.Log.WithName("controllers").WithName("GrafanaDashboard"),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "GrafanaDashboard")
+		setupLog.V(4).Error(err, "unable to create controller", "controller", "GrafanaDashboard")
 		os.Exit(1)
 	}
 	if err = (&controllers.NamespaceReconciler{
-		Client:  mgr.GetClient(),
-		Context: ctx,
-		Logger:  ctrl.Log.WithName("controllers").WithName("Namespace"),
-		Scheme:  mgr.GetScheme(),
+		Client: mgr.GetClient(),
+		Logger: ctrl.Log.WithName("controllers").WithName("Namespace"),
+		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Namespace")
+		setupLog.V(4).Error(err, "unable to create controller", "controller", "Namespace")
 		os.Exit(1)
 	}
 	if err = (&grafanadatasource.GrafanaDatasourceReconciler{
@@ -336,18 +333,19 @@ func main() { // nolint
 		Logger:   ctrl.Log.WithName("controllers").WithName("GrafanaDatasource"),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("GrafanaDatasource"),
+		//State:    common.ControllerState{},
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "GrafanaDatasource")
+		setupLog.V(4).Error(err, "unable to create controller", "controller", "GrafanaDatasource")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("health", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
+		setupLog.V(4).Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
 	if err := mgr.AddReadyzCheck("check", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
+		setupLog.V(4).Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
 
@@ -356,7 +354,7 @@ func main() { // nolint
 		"dashboardNamespaces", flagNamespaces,
 		"scanAll", scanAll)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
+		setupLog.V(4).Error(err, "problem running manager")
 		os.Exit(1)
 	}
 }
@@ -369,25 +367,25 @@ func startDashboardController(ns string, cfg *rest.Config, ctx context.Context) 
 		Namespace:          ns,
 	})
 	if err != nil {
-		log.Log.Error(err, "")
+		log.Log.V(4).Error(err, "")
 		os.Exit(1)
 	}
 
 	// Setup Scheme for the dashboard resource
 	if err := apis.AddToScheme(dashboardMgr.GetScheme()); err != nil {
-		log.Log.Error(err, "")
+		log.Log.V(4).Error(err, "")
 		os.Exit(1)
 	}
 
 	// Use a separate manager for the dashboard controller
 	err = grafanadashboard.Add(dashboardMgr, ns)
 	if err != nil {
-		log.Log.Error(err, "")
+		log.Log.V(4).Error(err, "")
 	}
 
 	go func() {
 		if err := dashboardMgr.Start(ctx); err != nil {
-			log.Log.Error(err, "dashboard manager exited non-zero")
+			log.Log.V(4).Error(err, "dashboard manager exited non-zero")
 			os.Exit(1)
 		}
 	}()
@@ -401,26 +399,26 @@ func startNotificationChannelController(ns string, cfg *rest.Config, ctx context
 		Namespace:          ns,
 	})
 	if err != nil {
-		log.Log.Error(err, "")
+		log.Log.V(4).Error(err, "")
 		os.Exit(1)
 	}
 
 	// Setup Scheme for the notification channel resource
 	if err := apis.AddToScheme(channelMgr.GetScheme()); err != nil {
-		log.Log.Error(err, "")
+		log.Log.V(4).Error(err, "")
 		os.Exit(1)
 	}
 
 	// Use a separate manager for the dashboard controller
 	err = grafananotificationchannel.Add(channelMgr, ns)
 	if err != nil {
-		log.Log.Error(err, "")
+		log.Log.V(4).Error(err, "")
 		os.Exit(1)
 	}
 
 	go func() {
 		if err := channelMgr.Start(ctx); err != nil {
-			log.Log.Error(err, "notification channel manager exited non-zero")
+			log.Log.V(4).Error(err, "notification channel manager exited non-zero")
 			os.Exit(1)
 		}
 	}()

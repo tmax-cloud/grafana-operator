@@ -19,13 +19,19 @@ package grafanadatasource
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"os"
 	"sort"
+	"time"
 
 	"github.com/go-logr/logr"
 	grafanav1alpha1 "github.com/grafana-operator/grafana-operator/v4/api/integreatly/v1alpha1"
 	"github.com/grafana-operator/grafana-operator/v4/controllers/common"
+	"github.com/grafana-operator/grafana-operator/v4/controllers/config"
 	"github.com/grafana-operator/grafana-operator/v4/controllers/constants"
 	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -44,12 +50,16 @@ import (
 type GrafanaDatasourceReconciler struct {
 	// This Client, initialized using mgr.Client() above, is a split Client
 	// that reads objects from the cache and writes to the apiserver
-	Client   client.Client
-	Scheme   *runtime.Scheme
-	Context  context.Context
-	Cancel   context.CancelFunc
-	Recorder record.EventRecorder
-	Logger   logr.Logger
+	Client            client.Client
+	Scheme            *runtime.Scheme
+	Context           context.Context
+	Cancel            context.CancelFunc
+	GrafanaClientImpl *GrafanaClient
+	config            *config.ControllerConfig
+	Recorder          record.EventRecorder
+	transport         *http.Transport
+	state             common.ControllerState
+	Logger            logr.Logger
 }
 
 const (
@@ -67,36 +77,140 @@ var _ reconcile.Reconciler = &GrafanaDatasourceReconciler{}
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.7.0/pkg/reconcile
 func (r *GrafanaDatasourceReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
-	log = r.Logger.WithValues("grafanadatasource", request.NamespacedName)
-	// Read the current state of known and cluster datasources
-	currentState := common.NewDataSourcesState()
-	err := currentState.Read(ctx, r.Client, request.Namespace)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-
-	if currentState.KnownDataSources == nil {
-		log.V(1).Info("no datasources configmap found")
+	log = r.Logger.WithValues(ControllerName, request.NamespacedName)
+	log.V(1).Info("Start datasource reconcile")
+	// If Grafana is not running there is no need to continue
+	/*if !r.state.GrafanaReady {
+		log.V(1).Info("no grafana instance available")
 		return reconcile.Result{Requeue: false}, nil
+	}*/
+
+	getClient, err := r.getClient()
+	if err != nil {
+		return reconcile.Result{RequeueAfter: config.RequeueDelay}, err
 	}
 
-	// Reconcile all data sources
-	err = r.reconcileDataSources(currentState)
+	// Initial request?
+	if request.Name == "" {
+		return r.reconcileDataSources(request, getClient)
+	}
+
+	// Check if the label selectors are available yet. If not then the grafana controller
+	// has not finished initializing and we can't continue. Reschedule for later.
+
+	// Fetch the GrafanaDashboard instance
+	instance := &grafanav1alpha1.GrafanaDataSource{}
+	err = r.Client.Get(r.Context, request.NamespacedName, instance)
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			// If some dashboard has been deleted, then always re sync the world
+			log.V(1).Info("deleting datasource", "namespace", request.Namespace, "name", request.Name)
+			return r.reconcileDataSources(request, getClient)
+		}
+		// Error reading the object - requeue the request.
+		return reconcile.Result{}, err
+	}
+
+	// If the dashboard does not match the label selectors then we ignore it
+	/*cr := instance.DeepCopy()
+	if !r.isMatch(cr) {
+		log.V(1).Info(fmt.Sprintf("dashboard %v/%v found but selectors do not match",
+			cr.Namespace, cr.Name))
+		return ctrl.Result{}, nil
+	}*/
+	// Otherwise always re sync all dashboards in the namespace
+	return r.reconcileDataSources(request, getClient)
+}
+
+func (r *GrafanaDatasourceReconciler) reconcileDataSources(request reconcile.Request, grafanaClient GrafanaClient) (reconcile.Result, error) { // nolint
+	// Collect known and namespace dashboards
+	knownDatasources, _ := grafanaClient.GetDatasourceList()
+	namespaceDatasources := &grafanav1alpha1.GrafanaDataSourceList{}
+
+	opts := &client.ListOptions{
+		Namespace: request.Namespace,
+	}
+
+	err := r.Client.List(r.Context, namespaceDatasources, opts)
 	if err != nil {
 		return reconcile.Result{}, err
+	}
+
+	// Prepare lists
+	var datasourcesToDelete []*grafanav1alpha1.GrafanaDataSource
+
+	// Dashboards to delete: dashboards that are known but not found
+	// any longer in the namespace
+	var ds_url []string
+	for _, kds := range knownDatasources {
+		ds_url = append(ds_url, *kds.URL)
+	}
+
+	// Process new/updated dashboards
+	for i, datasource := range namespaceDatasources.Items {
+		// Is this a dashboard we care about (matches the label selectors)?
+		//log.Log.V(1).Info(namespaceDashboards.Items[i].ObjectMeta.GetAnnotations()["userId"])
+
+		// Process the dashboard. Use the known hash of an existing dashboard
+		// to determine if an update is required
+		if checkdup(ds_url, &namespaceDatasources.Items[i]) {
+			r.manageError(&namespaceDatasources.Items[i], err)
+		} else {
+			datasourcesToDelete = append(datasourcesToDelete, &namespaceDatasources.Items[i])
+		}
+
+		// Check known dashboards exist on grafana instance and recreate if not
+
+		// Check labels only when DashboardNamespaceSelector isnt empty
+		datasourceres, err := grafanaClient.CreateGrafanaDatasource(datasource)
+
+		if err != nil {
+			log.V(4).Error(err, "failed to create datasource", datasourceres.URL, "datasource", request.Name)
+			r.manageError(&namespaceDatasources.Items[i], err)
+			continue
+		}
+
+		r.manageSuccess(&namespaceDatasources.Items[i])
+	}
+
+	for _, dashboard := range datasourcesToDelete {
+		_, err := grafanaClient.DeleteDatasourceByUID(dashboard.Spec.Datasources[0].Uid)
+		if err != nil {
+			log.V(4).Error(err, "error deleting dashboard, status was",
+				"dashboardUID", dashboard.Spec.Datasources[0].Uid)
+		}
+
+		log.V(1).Info(fmt.Sprintf("delete Datasource success"))
+
+		// Mark the dashboards as synced so that the current state can be written
+		// to the Grafana CR by the grafana controller
+
+		// Refresh the list of known datasource after the dashboard has been removed
+		//knownDatasources = r.config.GetDatasources(request.Namespace)
+
 	}
 
 	return reconcile.Result{Requeue: false}, nil
 }
 
-func (r *GrafanaDatasourceReconciler) reconcileDataSources(state *common.DataSourcesState) error {
+func checkdup(knownDatasources []string, item *grafanav1alpha1.GrafanaDataSource) bool {
+	for _, d := range knownDatasources {
+		if item.Spec.Datasources[0].Url == d {
+			return true
+		}
+	}
+	return false
+}
+
+/*
+func (r *GrafanaDatasourceReconciler) reconcileDataSources(state *GrafanaClientImpl, grafanaClient GrafanaClientImpl) error {
 	var dataSourcesToAddOrUpdate []grafanav1alpha1.GrafanaDataSource
 	var dataSourcesToDelete []string
 
 	// check if a given datasource (by its key) is found on the cluster
 	foundOnCluster := func(key string) bool {
 		for _, ds := range state.ClusterDataSources.Items {
-			if key == ds.Filename() {
+			if key == ds.Spec.Datasources[0].Url {
 				return true
 			}
 		}
@@ -110,45 +224,47 @@ func (r *GrafanaDatasourceReconciler) reconcileDataSources(state *common.DataSou
 	// Data sources to delete: if a datasourcedashboard is in the configmap but cannot
 	// be found on the cluster then we assume it has been deleted and remove
 	// it from the configmap
-	for ds := range state.KnownDataSources.Data {
-		if !foundOnCluster(ds) {
-			dataSourcesToDelete = append(dataSourcesToDelete, ds)
+	for ds := range state.KnownDataSources.Items {
+		if !foundOnCluster(state.KnownDataSources.Items[ds].Spec.Datasources[0].Url) {
+			dataSourcesToDelete = append(dataSourcesToDelete, string(state.KnownDataSources.Items[ds].UID))
 		}
 	}
 
 	// apply dataSourcesToDelete
 	for _, ds := range dataSourcesToDelete {
 		log.V(1).Info("deleting datasource", "datasource", ds)
-		if state.KnownDataSources.Data != nil {
-			delete(state.KnownDataSources.Data, ds)
+		if ds != "" {
+			//delete(state.KnownDataSources.Data, ds)
+			grafanaClient.DeleteDatasourceByUID(ds)
 		}
 	}
 
 	// apply dataSourcesToAddOrUpdate
 	var updated []grafanav1alpha1.GrafanaDataSource // nolint
 	for i := range dataSourcesToAddOrUpdate {
-		pipeline := NewDatasourcePipeline(&dataSourcesToAddOrUpdate[i])
-		err := pipeline.ProcessDatasource(state.KnownDataSources)
-		if err != nil {
-			r.manageError(&dataSourcesToAddOrUpdate[i], err)
-			continue
-		}
+		/*	pipeline := NewDatasourcePipeline(&dataSourcesToAddOrUpdate[i])
+			err := pipeline.ProcessDatasource(state.KnownDataSources.)
+			if err != nil {
+				r.manageError(&dataSourcesToAddOrUpdate[i], err)
+				continue
+			}
 		updated = append(updated, dataSourcesToAddOrUpdate[i])
 	}
 
 	// update the hash of the newly reconciled datasources
-	hash, err := r.updateHash(state.KnownDataSources)
+	/*hash, err := r.updateHash(state.KnownDataSources)
 	if err != nil {
 		r.manageError(nil, err)
 		return err
 	}
-
-	if state.KnownDataSources.Annotations == nil {
-		state.KnownDataSources.Annotations = map[string]string{}
+	for ds := range state.KnownDataSources.Items {
+		if state.KnownDataSources.Items[ds].Annotations == nil {
+			state.KnownDataSources.Items[ds].Annotations = map[string]string{}
+		}
 	}
 
 	// Compare the last hash to the previous one, update if changed
-	lastHash := state.KnownDataSources.Annotations[constants.LastConfigAnnotation]
+	/*lastHash := state.KnownDataSources.Annotations[constants.LastConfigAnnotation]
 	if lastHash != hash {
 		state.KnownDataSources.Annotations[constants.LastConfigAnnotation] = hash
 
@@ -160,8 +276,20 @@ func (r *GrafanaDatasourceReconciler) reconcileDataSources(state *common.DataSou
 			r.manageSuccess(updated)
 		}
 	}
+	var proof_ds []grafanav1alpha1.GrafanaDataSource
+	for ds := range updated {
+		_, err2 := state.CreateGrafanaDatasource(updated[ds])
+
+		if err2 != nil {
+			r.manageError(nil, err2)
+		} else {
+			proof_ds = append(proof_ds, updated[ds])
+		}
+
+	}
+
 	return nil
-}
+}*/
 
 func (i *GrafanaDatasourceReconciler) updateHash(known *v1.ConfigMap) (string, error) {
 	if known == nil || known.Data == nil {
@@ -216,25 +344,125 @@ func (r *GrafanaDatasourceReconciler) manageError(datasource *grafanav1alpha1.Gr
 
 // manage success case: datasource has been imported successfully and the configmap
 // is updated
-func (r *GrafanaDatasourceReconciler) manageSuccess(datasources []grafanav1alpha1.GrafanaDataSource) {
-	for i, datasource := range datasources {
-		log.V(1).Info("datasource successfully imported",
-			"datasource.Namespace", datasource.Namespace,
-			"datasource.Name", datasource.Name)
+func (r *GrafanaDatasourceReconciler) manageSuccess(datasource *grafanav1alpha1.GrafanaDataSource) {
 
-		datasource.Status.Phase = grafanav1alpha1.PhaseReconciling
-		datasource.Status.Message = "success"
+	log.V(1).Info("datasource successfully imported",
+		"datasource.Namespace", datasource.Namespace,
+		"datasource.Name", datasource.Name)
 
-		err := r.Client.Status().Update(r.Context, &datasources[i])
-		if err != nil {
-			r.Recorder.Event(&datasources[i], "Warning", "UpdateError", err.Error())
-		}
-	}
+	datasource.Status.Phase = grafanav1alpha1.PhaseReconciling
+	datasource.Status.Message = "success"
+
 }
 
 // SetupWithManager sets up the controller with the Manager.
+/*
+func SetupWithManager(mgr ctrl.Manager, r reconcile.Reconciler, namespace string) error {
+	c, err := controller.New("grafanadatasource-controller", mgr, controller.Options{Reconciler: r})
+	if err != nil {
+		return err
+	}
+
+	// Watch for changes to primary resource GrafanaDashboard
+	err = c.Watch(&source.Kind{Type: &grafanav1alpha1.GrafanaDataSource{}}, &handler.EnqueueRequestForObject{})
+	if err == nil {
+		log.V(1).Info("Starting datasource controller")
+	}
+
+	ref := r.(*GrafanaDatasourceReconciler) // nolint
+	ticker := time.NewTicker(config.RequeueDelay)
+	sendEmptyRequest := func() {
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: namespace,
+				Name:      "",
+			},
+		}
+		_, err = r.Reconcile(ref.Context, request)
+		if err != nil {
+			return
+		}
+	}
+
+	go func() {
+		for range ticker.C {
+			log.V(1).Info("running periodic dashboard resync")
+			sendEmptyRequest()
+		}
+	}()
+
+	go func() {
+		for stateChange := range common.ControllerEvents {
+			// Controller state updated
+			ref.state = stateChange
+		}
+	}()
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&integreatlyorgv1alpha1.GrafanaDashboard{}).
+		Complete(r)
+}*/
+
+func (r *GrafanaDatasourceReconciler) getClient() (GrafanaClient, error) {
+
+	url := r.state.AdminUrl
+	if url == "" {
+		return nil, errors.New("cannot get grafana admin url")
+	}
+	log.V(1).Info("url" + url)
+	username := os.Getenv(constants.GrafanaAdminUserEnvVar)
+	if username == "" {
+		return nil, errors.New("invalid credentials (username)")
+	}
+	log.V(1).Info(username)
+	password := os.Getenv(constants.GrafanaAdminPasswordEnvVar)
+	if password == "" {
+		return nil, errors.New("invalid credentials (password)")
+	}
+	log.V(1).Info(password)
+	duration := time.Duration(r.state.ClientTimeout)
+	r.transport = &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+	return NewGrafanaClient(url, username, password, r.transport, duration), nil
+}
+
+/*func Add(mgr manager.Manager, namespace string) error {
+	return SetupWithManager(mgr, newReconciler(mgr), namespace)
+}*/
 func (r *GrafanaDatasourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
+
+	go func() {
+		for stateChange := range common.ControllerEvents {
+			// Controller state updated
+			r.state = stateChange
+		}
+	}()
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&integreatlyorgv1alpha1.GrafanaDataSource{}).
+		Owns(&integreatlyorgv1alpha1.GrafanaDataSource{}).
 		Complete(r)
 }
+
+/*
+func newReconciler(mgr manager.Manager) reconcile.Reconciler {
+	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
+
+	return &GrafanaDatasourceReconciler{
+		Client: mgr.GetClient(),
+		transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+		Logger:   mgr.GetLogger(),
+		config:   config.GetControllerConfig(),
+		Context:  ctx,
+		Cancel:   cancel,
+		Recorder: mgr.GetEventRecorderFor(ControllerName),
+		State:    common.ControllerState{},
+	}
+}
+*/

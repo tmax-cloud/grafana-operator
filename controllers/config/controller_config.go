@@ -38,9 +38,10 @@ const (
 
 type ControllerConfig struct {
 	*sync.Mutex
-	Values     map[string]interface{}
-	Plugins    map[string]v1alpha1.PluginList
-	Dashboards []*v1alpha1.GrafanaDashboardRef
+	Values      map[string]interface{}
+	Plugins     map[string]v1alpha1.PluginList
+	Dashboards  []*v1alpha1.GrafanaDashboardRef
+	Datasources []*v1alpha1.GrafanaDataSource
 }
 
 var instance *ControllerConfig
@@ -150,6 +151,23 @@ func (c *ControllerConfig) RemoveDashboard(hash string) {
 		list = list[:len(list)-1]
 		c.Dashboards = list
 	}
+}
+
+func (c *ControllerConfig) GetDatasources(namespace string) []*v1alpha1.GrafanaDataSource {
+	//	c.Lock()
+	//	defer c.Unlock()
+	// Checking for dashboards at the cluster level? across namespaces?
+	if namespace == "" {
+		var datasources []*v1alpha1.GrafanaDataSource
+		datasources = append(datasources, c.Datasources...)
+
+		return datasources
+	}
+
+	if c.Datasources != nil {
+		return c.Datasources
+	}
+	return []*v1alpha1.GrafanaDataSource{}
 }
 
 func (c *ControllerConfig) GetDashboards(namespace string) []*v1alpha1.GrafanaDashboardRef {

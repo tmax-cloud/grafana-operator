@@ -113,6 +113,7 @@ func NewGrafanaClient(url, user, password string, transport *http.Transport, tim
 }
 
 func (r *GrafanaClientImpl) GetDashboard(UID string) (GrafanaDashboardResponse, error) {
+
 	rawURL := fmt.Sprintf(DeleteDashboardByUIDUrl, r.url, UID)
 	response := newDashboardResponse()
 

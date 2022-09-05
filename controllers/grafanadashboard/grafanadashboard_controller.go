@@ -384,6 +384,7 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 		r.config.AddConfigItem(config.ConfigGrafanaDashboardsSynced, true)
 
 		// Refresh the list of known dashboards after the dashboard has been removed
+		log.Log.V(1).Info("check duplicate")
 		knownDashboards = r.config.GetDashboards(request.Namespace)
 
 		// Check for empty managed folders (namespace-named) and delete obsolete ones
@@ -581,7 +582,7 @@ func (r *GrafanaDashboardReconciler) CreateGrafanaPermission(userIdList []int, d
 	permBody = permBody + `
 			]
 		}`
-	log.Log.V(1).Info(permBody)
+	//log.Log.V(1).Info(permBody)
 
 	request, _ := http.NewRequest("POST", httpposturl_per, bytes.NewBuffer([]byte(permBody)))
 

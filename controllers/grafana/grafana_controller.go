@@ -221,7 +221,7 @@ func (r *ReconcileGrafana) Reconcile(ctx context.Context, request reconcile.Requ
 	if err != nil {
 		return r.manageError(cr, err, request)
 	}
-
+	GiveAdmin()
 	return r.manageSuccess(cr, currentState, request)
 }
 
@@ -349,6 +349,7 @@ func (r *ReconcileGrafana) manageSuccess(cr *grafanav1alpha1.Grafana, state *com
 
 	log.V(1).Info("desired cluster state met")
 	log.V(1).Info("Start to give admin to Tmax account")
+
 	GiveAdmin() // create admin account
 	return reconcile.Result{RequeueAfter: config.RequeueDelay}, nil
 }
@@ -464,7 +465,7 @@ func GetCRBAdmin() string {
 		metav1.ListOptions{},
 	)
 
-	log.V(1).Info("crb list:", crbList)
+	//log.V(1).Info("crb list:", crbList)
 	if crbList == nil {
 		log.V(4).Error(err, "err")
 	}
@@ -485,7 +486,7 @@ func GiveAdmin() {
 	var hc_admin string
 	hc_admin = GetCRBAdmin() //"hc-admin@tmax.co.kr"
 	log.V(1).Info("Getting admin CRB")
-	log.V(1).Info(hc_admin)
+	//log.V(1).Info(hc_admin)
 	if GetGrafanaUser(hc_admin) == 0 && hc_admin != "" {
 		CreateGrafanaUser(hc_admin)
 		id := GetGrafanaUser(hc_admin)

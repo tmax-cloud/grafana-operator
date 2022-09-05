@@ -18,16 +18,14 @@ package controllers
 
 import (
 	"context"
-	"reflect"
 
 	"github.com/go-logr/logr"
+	"github.com/grafana-operator/grafana-operator/v4/controllers/common"
+	"github.com/grafana-operator/grafana-operator/v4/controllers/config"
 	"github.com/grafana-operator/grafana-operator/v4/controllers/grafana"
 	"github.com/grafana-operator/grafana-operator/v4/controllers/grafanadashboard"
 	"github.com/grafana-operator/grafana-operator/v4/controllers/model"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -41,29 +39,44 @@ type NamespaceReconciler struct {
 	client.Client
 	Logger  logr.Logger
 	Context context.Context
+	config  *config.ControllerConfig
+	state   common.ControllerState
 	Scheme  *runtime.Scheme
 }
+
+const (
+	ControllerName = "controller_namespace"
+)
 
 // +kubebuilder:rbac:groups=*,resources=*,verbs=*
 
 func (r *NamespaceReconciler) Reconcile(_ context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := r.Logger.WithValues(ControllerName, req.NamespacedName)
 	_ = context.Background()
 
 	// your logic here
-	klog.V(4).Info("Reconciling Namespace")
+	logger.V(4).Info("Reconciling Namespace")
+
+	/*if !r.state.GrafanaReady {
+		logger.V(1).Info("no grafana instance available")
+		return reconcile.Result{Requeue: false}, nil
+	}*/
 	namespace := &v1.Namespace{}
 
-	if err := r.Get(context.TODO(), req.NamespacedName, namespace); err != nil {
+	if err := r.Client.Get(context.TODO(), req.NamespacedName, namespace); err != nil {
 		if errors.IsNotFound(err) {
-			klog.V(4).Info("Namespace resource not found. Ignoring since object must be deleted.")
+			logger.V(4).Info("Namespace resource not found. Ignoring since object must be deleted.")
 			return ctrl.Result{}, nil
 		}
-		klog.V(1).Error(err, "Failed to get Namespace")
+		logger.V(1).Error(err, "Failed to get Namespace")
 		return ctrl.Result{}, err
 	}
-	s := namespace.Annotations["owner"]
-	if s == "" {
-		s = namespace.Annotations["creator"]
+	ns_owner := namespace.Annotations["owner"]
+	if ns_owner == "" {
+		ns_owner = namespace.Annotations["creator"]
+		if ns_owner == "" {
+			ns_owner = "kubernetes-admin"
+		}
 	}
 
 	model.GrafanaKey = grafana.GetGrafanaKey()
@@ -74,9 +87,9 @@ func (r *NamespaceReconciler) Reconcile(_ context.Context, req ctrl.Request) (ct
 			fmt.Println("Error !! : ", s)
 		}
 	}()*/
-	if s != "" {
-		klog.V(4).Info("user name is" + s)
-		grafanadashboard.CreateUserDashboard(context.TODO(), namespace.GetName(), s)
+	if ns_owner != "" {
+		logger.V(4).Info("user name is" + ns_owner)
+		grafanadashboard.CreateUserDashboard(context.TODO(), namespace.GetName(), ns_owner)
 	}
 
 	return ctrl.Result{}, nil
@@ -84,7 +97,7 @@ func (r *NamespaceReconciler) Reconcile(_ context.Context, req ctrl.Request) (ct
 func (r *NamespaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1.Namespace{}).
-		WithEventFilter(
+		/*WithEventFilter(
 			predicate.Funcs{
 				// Only reconciling if the status.status change
 				UpdateFunc: func(e event.UpdateEvent) bool {
@@ -101,6 +114,6 @@ func (r *NamespaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 					}
 				},
 			},
-		).
+		).*/
 		Complete(r)
 }

@@ -1,31 +1,35 @@
-package common
+package grafanadatasource
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"time"
 
 	"github.com/grafana-operator/grafana-operator/v4/api/integreatly/v1alpha1"
-	"github.com/grafana-operator/grafana-operator/v4/controllers/constants"
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
 	DeleteDatasourceByUIDUrl = "%v/api/datasource/uid/%v"
-	CreateDatasourceUrl      = "%v/api/datasources/"
+	CreateDatasourceUrl      = "%v/api/datasources"
 	GetDatasourceURL         = "%v/api/datasources/id/%v"
 	GetDatasourceListURL     = "%v/api/datasources/"
 	UpdateDatasourceUrl      = "%v/api/datasources/uid/%v"
 )
 
 type GrafanaClient interface {
+	GetDatasourceList() ([]GrafanaDatasourceResponse, error)
+	GetDatasource(UID string) (GrafanaDatasourceResponse, error)
+	CreateGrafanaDatasource(datasource v1alpha1.GrafanaDataSource) (GrafanaDatasourceResponse, error)
+	DeleteDatasourceByUID(UID string) (GrafanaDatasourceResponse, error)
+}
+
+func NewDataSourcesState2() *GrafanaClientImpl {
+	return &GrafanaClientImpl{}
 }
 
 type GrafanaDatasourceResponse struct {
@@ -48,17 +52,14 @@ type GrafanaDatasourceRequest struct {
 }
 
 type GrafanaClientImpl struct {
-	url                string
-	user               string
-	password           string
-	client             *http.Client
-	ClusterDataSources *v1alpha1.GrafanaDataSourceList
-	KnownDataSources   *v1alpha1.GrafanaDataSourceList
+	url      string
+	user     string
+	password string
+	client   *http.Client
+	//ClusterDataSources *v1alpha1.GrafanaDataSourceList
+	//KnownDataSources   *v1alpha1.GrafanaDataSourceList
 }
 
-func NewDataSourcesState2() *GrafanaClientImpl {
-	return &GrafanaClientImpl{}
-}
 func newResponse() GrafanaDatasourceResponse {
 	var id uint = 0
 	var orgID uint = 0
@@ -79,69 +80,6 @@ func newResponse() GrafanaDatasourceResponse {
 	}
 }
 
-type DataSourcesState struct {
-	ClusterDataSources *v1alpha1.GrafanaDataSourceList
-	KnownDataSources   *v1.ConfigMap
-}
-
-func NewDataSourcesState() *DataSourcesState {
-	return &DataSourcesState{}
-}
-
-func (i *GrafanaClientImpl) Read(ctx context.Context, client client.Client, grafanaclient GrafanaClient, ns string) error {
-	err := readClusterDataSources(ctx, client, ns)
-	if err != nil {
-		return err
-	}
-
-	var datasourceList []GrafanaDatasourceResponse
-	datasourceList, err = i.GetDatasourceList()
-
-	if datasourceList != nil {
-		return err
-	}
-
-	return nil
-}
-
-func readClusterDataSources(ctx context.Context, c client.Client, ns string) error {
-	list := &v1alpha1.GrafanaDataSourceList{}
-	opts := &client.ListOptions{
-		Namespace: ns,
-	}
-
-	err := c.List(ctx, list, opts)
-	i := &DataSourcesState{}
-	if err != nil {
-		i.ClusterDataSources = list
-		return err
-	}
-
-	i.ClusterDataSources = list
-	return nil
-}
-
-func (i *DataSourcesState) readKnownDataSources(ctx context.Context, c client.Client, ns string) error {
-
-	dataSources := &v1.ConfigMap{}
-	selector := client.ObjectKey{
-		Namespace: ns,
-		Name:      constants.GrafanaDatasourcesConfigMapName,
-	}
-
-	err := c.Get(ctx, selector, dataSources)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return nil
-		}
-		return err
-	}
-
-	i.KnownDataSources = dataSources
-
-	return nil
-}
-
 func setHeaders(req *http.Request) {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
@@ -150,7 +88,6 @@ func setHeaders(req *http.Request) {
 
 func (r *GrafanaClientImpl) GetDatasourceList() ([]GrafanaDatasourceResponse, error) {
 	rawURL := fmt.Sprintf(GetDatasourceListURL, r.url)
-
 	parsed, err := url.Parse(rawURL)
 
 	if err != nil {
@@ -158,6 +95,7 @@ func (r *GrafanaClientImpl) GetDatasourceList() ([]GrafanaDatasourceResponse, er
 	}
 
 	parsed.User = url.UserPassword(r.user, r.password)
+	log.V(1).Info(parsed.User.String())
 	req, err := http.NewRequest("GET", parsed.String(), nil)
 
 	if err != nil {
@@ -165,8 +103,10 @@ func (r *GrafanaClientImpl) GetDatasourceList() ([]GrafanaDatasourceResponse, er
 	}
 
 	setHeaders(req)
-
-	resp, err := r.client.Do(req)
+	reqdump, err := httputil.DumpRequestOut(req, true)
+	log.V(1).Info("check nil" + string(reqdump))
+	var resp *http.Response
+	resp, err = r.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -188,12 +128,10 @@ func (r *GrafanaClientImpl) GetDatasourceList() ([]GrafanaDatasourceResponse, er
 		return nil, err
 	}
 
-	datasrouces := &v1alpha1.GrafanaDataSourceList{}
-	var datasrouces2 []GrafanaDatasourceResponse
-	err = json.Unmarshal(data, &datasrouces2)
+	var datasrouces []GrafanaDatasourceResponse
+	err = json.Unmarshal(data, &datasrouces)
 
-	r.KnownDataSources = datasrouces
-	return datasrouces2, err
+	return datasrouces, err
 }
 
 func (r *GrafanaClientImpl) GetDatasource(UID string) (GrafanaDatasourceResponse, error) {
@@ -246,12 +184,14 @@ func (r *GrafanaClientImpl) CreateGrafanaDatasource(datasource v1alpha1.GrafanaD
 	if err != nil {
 		return response, err
 	}
+	//log.V(1).Info("URL : ", datasource.Spec.Datasources[0].Access)
 	raw, err := json.Marshal(GrafanaDatasourceRequest{
 		Name: datasource.Spec.Datasources[0].Name,
 
 		Type: datasource.Spec.Datasources[0].Type,
 
-		URL: datasource.Spec.Datasources[0].Url,
+		URL:    datasource.Spec.Datasources[0].Url,
+		Access: datasource.Spec.Datasources[0].Access,
 	})
 	if err != nil {
 		return response, err
@@ -281,11 +221,9 @@ func (r *GrafanaClientImpl) CreateGrafanaDatasource(datasource v1alpha1.GrafanaD
 	if err != nil {
 		return response, err
 	}
-
 	err = json.Unmarshal(data, &response)
 
 	return response, err
-
 }
 
 func (r *GrafanaClientImpl) DeleteDatasourceByUID(UID string) (GrafanaDatasourceResponse, error) {
@@ -340,3 +278,38 @@ func NewGrafanaClient(url, user, password string, transport *http.Transport, tim
 		client:   client,
 	}
 }
+
+/*
+func (i *GrafanaClientImpl) Read(ctx context.Context, client client.Client, ns string) error {
+	err := readClusterDataSources(ctx, client, ns)
+	if err != nil {
+		return err
+	}
+
+	var datasourceList []GrafanaDatasourceResponse
+	datasourceList, err = i.GetDatasourceList()
+
+	if datasourceList != nil {
+		return err
+	}
+
+	return nil
+}*/
+/*
+func readClusterDataSources(ctx context.Context, c client.Client, ns string) error {
+	list := &v1alpha1.GrafanaDataSourceList{}
+	opts := &client.ListOptions{
+		Namespace: ns,
+	}
+
+	err := c.List(ctx, list, opts)
+	i := &GrafanaClientImpl{}
+	if err != nil {
+		i.ClusterDataSources = list
+		return err
+	}
+
+	i.ClusterDataSources = list
+	return nil
+}
+*/
