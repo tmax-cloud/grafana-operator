@@ -142,8 +142,10 @@ func (r *GrafanaDatasourceReconciler) reconcileDataSources(request reconcile.Req
 	// Dashboards to delete: dashboards that are known but not found
 	// any longer in the namespace
 	var ds_url []string
-	for _, kds := range knownDatasources {
+	//log.V(1).Info("known datasources : ", *knownDatasources[0].Name)
+	for i, kds := range knownDatasources {
 		ds_url = append(ds_url, *kds.URL)
+		log.V(1).Info(ds_url[i], " ", *kds.URL)
 	}
 
 	// Process new/updated dashboards
@@ -153,19 +155,21 @@ func (r *GrafanaDatasourceReconciler) reconcileDataSources(request reconcile.Req
 
 		// Process the dashboard. Use the known hash of an existing dashboard
 		// to determine if an update is required
-		if checkdup(ds_url, &namespaceDatasources.Items[i]) {
-			r.manageError(&namespaceDatasources.Items[i], err)
-		} else {
+		//{
+		//r.manageError(&namespaceDatasources.Items[i], err)
+		//} else
+		if !checkdup(ds_url, &namespaceDatasources.Items[i]) {
 			datasourcesToDelete = append(datasourcesToDelete, &namespaceDatasources.Items[i])
+			log.V(1).Info("datasource to delete : ", datasource.Spec.Datasources[0].Name)
 		}
 
 		// Check known dashboards exist on grafana instance and recreate if not
 
 		// Check labels only when DashboardNamespaceSelector isnt empty
-		datasourceres, err := grafanaClient.CreateGrafanaDatasource(datasource)
+		_, err := grafanaClient.CreateGrafanaDatasource(datasource)
 
 		if err != nil {
-			log.V(4).Error(err, "failed to create datasource", datasourceres.URL, "datasource", request.Name)
+			log.V(4).Error(err, "failed to create datasource")
 			r.manageError(&namespaceDatasources.Items[i], err)
 			continue
 		}
