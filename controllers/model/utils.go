@@ -56,7 +56,7 @@ type Grafana_User_Get struct {
 	Login          string `json:"login"`
 	Theme          string `json:"light"`
 	OrgId          string `json:"OrgId"`
-	IsGrafanaAdmin string `json:"isGrafanaAdmin"`
+	IsGrafanaAdmin bool   `json:"isGrafanaAdmin"`
 	IsDisabled     string `json:"isDisabled"`
 	IsExternal     string `json:"isExternal"`
 	AuthLabels     string `json:"authLabels"`

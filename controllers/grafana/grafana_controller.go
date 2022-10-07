@@ -451,6 +451,9 @@ func GetGrafanaUser(email string) int {
 		body, _ := ioutil.ReadAll(resp.Body)
 		json.Unmarshal([]byte(body), &GrafanaUserGet)
 	}
+	if GrafanaUserGet.IsGrafanaAdmin {
+		return -1
+	}
 	return GrafanaUserGet.Id
 }
 
