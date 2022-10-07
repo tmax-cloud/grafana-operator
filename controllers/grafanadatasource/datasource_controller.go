@@ -124,8 +124,8 @@ func (r *GrafanaDatasourceReconciler) Reconcile(ctx context.Context, request ctr
 
 func (r *GrafanaDatasourceReconciler) reconcileDataSources(request reconcile.Request, grafanaClient GrafanaClient) (reconcile.Result, error) { // nolint
 	// Collect known and namespace dashboards
-	knownDatasources, _ := grafanaClient.GetDatasourceList()
-	namespaceDatasources := &grafanav1alpha1.GrafanaDataSourceList{}
+	knownDatasources, _ := grafanaClient.GetDatasourceList()         // from grafana
+	namespaceDatasources := &grafanav1alpha1.GrafanaDataSourceList{} // from k8s
 
 	opts := &client.ListOptions{
 		Namespace: request.Namespace,
@@ -137,47 +137,58 @@ func (r *GrafanaDatasourceReconciler) reconcileDataSources(request reconcile.Req
 	}
 
 	// Prepare lists
-	var datasourcesToDelete []*grafanav1alpha1.GrafanaDataSource
+	var datasourcesToDelete []GrafanaDatasourceResponse
 
 	// Dashboards to delete: dashboards that are known but not found
 	// any longer in the namespace
 	var ds_url []string
+	log.V(1).Info("known ds")
 	for _, kds := range knownDatasources {
+
 		ds_url = append(ds_url, *kds.URL)
 	}
 
 	// Process new/updated dashboards
+
+	var k8s_ds_url []string
 	for i, datasource := range namespaceDatasources.Items {
 		// Is this a dashboard we care about (matches the label selectors)?
 		//log.Log.V(1).Info(namespaceDashboards.Items[i].ObjectMeta.GetAnnotations()["userId"])
 
 		// Process the dashboard. Use the known hash of an existing dashboard
 		// to determine if an update is required
-		if checkdup(ds_url, &namespaceDatasources.Items[i]) {
-			r.manageError(&namespaceDatasources.Items[i], err)
-		} else {
-			datasourcesToDelete = append(datasourcesToDelete, &namespaceDatasources.Items[i])
+		k8s_ds_url = append(k8s_ds_url, datasource.Spec.Datasources[0].Url)
+
+		if checkdup(ds_url, datasource.Spec.Datasources[0].Url) {
+			//r.manageError(&namespaceDatasources.Items[i], err)
+			log.V(1).Info("check duplicate datasource")
+			continue
 		}
 
 		// Check known dashboards exist on grafana instance and recreate if not
 
 		// Check labels only when DashboardNamespaceSelector isnt empty
-		datasourceres, err := grafanaClient.CreateGrafanaDatasource(datasource)
+		log.V(1).Info("create datasource")
+		_, err := grafanaClient.CreateGrafanaDatasource(datasource)
 
 		if err != nil {
-			log.V(4).Error(err, "failed to create datasource", datasourceres.URL, "datasource", request.Name)
+			log.V(4).Error(err, "failed to create datasource")
 			r.manageError(&namespaceDatasources.Items[i], err)
 			continue
 		}
 
 		r.manageSuccess(&namespaceDatasources.Items[i])
 	}
-
+	for _, ds := range knownDatasources {
+		if !checkdup(k8s_ds_url, *ds.URL) {
+			datasourcesToDelete = append(datasourcesToDelete, ds)
+		}
+	}
 	for _, dashboard := range datasourcesToDelete {
-		_, err := grafanaClient.DeleteDatasourceByUID(dashboard.Spec.Datasources[0].Uid)
+		_, err := grafanaClient.DeleteDatasourceByUID(*dashboard.UID)
 		if err != nil {
 			log.V(4).Error(err, "error deleting dashboard, status was",
-				"dashboardUID", dashboard.Spec.Datasources[0].Uid)
+				"dashboardUID", *dashboard.UID)
 		}
 
 		log.V(1).Info(fmt.Sprintf("delete Datasource success"))
@@ -193,9 +204,9 @@ func (r *GrafanaDatasourceReconciler) reconcileDataSources(request reconcile.Req
 	return reconcile.Result{Requeue: false}, nil
 }
 
-func checkdup(knownDatasources []string, item *grafanav1alpha1.GrafanaDataSource) bool {
+func checkdup(knownDatasources []string, item string) bool {
 	for _, d := range knownDatasources {
-		if item.Spec.Datasources[0].Url == d {
+		if item == d {
 			return true
 		}
 	}
@@ -408,17 +419,17 @@ func (r *GrafanaDatasourceReconciler) getClient() (GrafanaClient, error) {
 	if url == "" {
 		return nil, errors.New("cannot get grafana admin url")
 	}
-	log.V(1).Info("url" + url)
+
 	username := os.Getenv(constants.GrafanaAdminUserEnvVar)
 	if username == "" {
 		return nil, errors.New("invalid credentials (username)")
 	}
-	log.V(1).Info(username)
+
 	password := os.Getenv(constants.GrafanaAdminPasswordEnvVar)
 	if password == "" {
 		return nil, errors.New("invalid credentials (password)")
 	}
-	log.V(1).Info(password)
+
 	duration := time.Duration(r.state.ClientTimeout)
 	r.transport = &http.Transport{
 		TLSClientConfig: &tls.Config{

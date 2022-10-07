@@ -88,7 +88,7 @@ func (r *NamespaceReconciler) Reconcile(_ context.Context, req ctrl.Request) (ct
 		}
 	}()*/
 	if ns_owner != "" {
-		logger.V(4).Info("user name is" + ns_owner)
+		logger.V(1).Info("user name is" + ns_owner)
 		grafanadashboard.CreateUserDashboard(context.TODO(), namespace.GetName(), ns_owner)
 	}
 

@@ -277,11 +277,11 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 	// Process new/updated dashboards
 	for i, dashboard := range namespaceDashboards.Items {
 		// Is this a dashboard we care about (matches the label selectors)?
-		if !r.isMatch(&namespaceDashboards.Items[i]) {
+		/*if !r.isMatch(&namespaceDashboards.Items[i]) {
 			log.Log.V(1).Info("dashboard found but selectors do not match",
 				"namespace", dashboard.Namespace, "name", dashboard.Name)
 			continue
-		}
+		}*/
 		//log.Log.V(1).Info(namespaceDashboards.Items[i].ObjectMeta.GetAnnotations()["userId"])
 
 		folderName := dashboard.Namespace
@@ -316,6 +316,8 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 			response, err := grafanaClient.GetDashboard(knownUid)
 			if err != nil {
 				log.Log.V(4).Error(err, "Failed to search Grafana for dashboard")
+			} else {
+				continue
 			}
 
 			if *response.Dashboard.ID == uint(0) {

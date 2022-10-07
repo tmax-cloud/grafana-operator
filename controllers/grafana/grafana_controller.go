@@ -221,7 +221,7 @@ func (r *ReconcileGrafana) Reconcile(ctx context.Context, request reconcile.Requ
 	if err != nil {
 		return r.manageError(cr, err, request)
 	}
-	GiveAdmin()
+	//	GiveAdmin()
 	return r.manageSuccess(cr, currentState, request)
 }
 
@@ -347,8 +347,8 @@ func (r *ReconcileGrafana) manageSuccess(cr *grafanav1alpha1.Grafana, state *com
 
 	common.ControllerEvents <- controllerState
 
-	log.V(1).Info("desired cluster state met")
-	log.V(1).Info("Start to give admin to Tmax account")
+	//log.V(1).Info("desired cluster state met")
+	//log.V(1).Info("Start to give admin to Tmax account")
 
 	GiveAdmin() // create admin account
 	return reconcile.Result{RequeueAfter: config.RequeueDelay}, nil
@@ -455,7 +455,7 @@ func GetGrafanaUser(email string) int {
 }
 
 func GetCRBAdmin() string {
-	log.V(1).Info("getting crb")
+	//log.V(1).Info("getting crb")
 	var config *rest.Config
 	var err error
 	config, err = rest.InClusterConfig()
@@ -467,7 +467,7 @@ func GetCRBAdmin() string {
 
 	//log.V(1).Info("crb list:", crbList)
 	if crbList == nil {
-		log.V(4).Error(err, "err")
+		log.V(4).Error(err, "no clusterrolebinding")
 	}
 
 	var adminemail string
@@ -475,7 +475,7 @@ func GetCRBAdmin() string {
 		log.V(1).Info(crb.Name)
 		if crb.Name == "admin" {
 			adminemail = crb.Subjects[0].Name
-			log.V(1).Info("admin is " + adminemail)
+			//log.V(1).Info("admin is " + adminemail)
 			break
 		}
 	}
@@ -485,7 +485,7 @@ func GetCRBAdmin() string {
 func GiveAdmin() {
 	var hc_admin string
 	hc_admin = GetCRBAdmin() //"hc-admin@tmax.co.kr"
-	log.V(1).Info("Getting admin CRB")
+	//log.V(1).Info("Getting admin CRB")
 	//log.V(1).Info(hc_admin)
 	if GetGrafanaUser(hc_admin) == 0 && hc_admin != "" {
 		CreateGrafanaUser(hc_admin)

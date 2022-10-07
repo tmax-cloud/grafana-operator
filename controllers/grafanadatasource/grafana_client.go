@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	DeleteDatasourceByUIDUrl = "%v/api/datasource/uid/%v"
+	DeleteDatasourceByUIDUrl = "%v/api/datasources/uid/%v"
 	CreateDatasourceUrl      = "%v/api/datasources"
 	GetDatasourceURL         = "%v/api/datasources/id/%v"
 	GetDatasourceListURL     = "%v/api/datasources/"
