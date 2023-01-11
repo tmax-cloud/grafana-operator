@@ -221,7 +221,9 @@ var _ reconcile.Reconciler = &GrafanaDashboardReconciler{}
 // Check if a given dashboard (by name) is present in the list of
 // dashboards in the namespace
 func inNamespace(namespaceDashboards *grafanav1alpha1.GrafanaDashboardList, item *grafanav1alpha1.GrafanaDashboardRef) bool {
+
 	for _, d := range namespaceDashboards.Items {
+
 		if d.Name == item.Name && d.Namespace == item.Namespace {
 			return true
 		}
@@ -251,14 +253,15 @@ func findUid(knownDashboards []*integreatlyorgv1alpha1.GrafanaDashboardRef, item
 
 func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Request, grafanaClient GrafanaClient) (reconcile.Result, error) { // nolint
 	// Collect known and namespace dashboards
-	knownDashboards := r.config.GetDashboards(request.Namespace)
-	namespaceDashboards := &grafanav1alpha1.GrafanaDashboardList{}
+	knownDashboards := r.config.GetDashboards(request.Namespace)   // grafana
+	namespaceDashboards := &grafanav1alpha1.GrafanaDashboardList{} //k8s
 
-	opts := &client.ListOptions{
+	/*opts := &client.ListOptions{
 		Namespace: request.Namespace,
-	}
+	}*/
 
-	err := r.Client.List(r.context, namespaceDashboards, opts)
+	err := r.Client.List(r.context, namespaceDashboards)
+
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -271,11 +274,13 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 	for _, dashboard := range knownDashboards {
 		if !inNamespace(namespaceDashboards, dashboard) {
 			dashboardsToDelete = append(dashboardsToDelete, dashboard)
+			//log.Log.V(1).Info("dashboard to delete" + dashboard.Namespace + " " + dashboard.UID)
 		}
 	}
 
 	// Process new/updated dashboards
-	for i, dashboard := range namespaceDashboards.Items {
+	for i := range namespaceDashboards.Items {
+		dashboard := namespaceDashboards.Items[i]
 		// Is this a dashboard we care about (matches the label selectors)?
 		/*if !r.isMatch(&namespaceDashboards.Items[i]) {
 			log.Log.V(1).Info("dashboard found but selectors do not match",
@@ -293,7 +298,7 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 
 		if err != nil {
 			log.Log.V(4).Error(err, "failed to get or create namespace folder for dashboard", "folder", folderName, "dashboard", request.Name)
-			r.manageError(&namespaceDashboards.Items[i], err)
+			r.manageError(&dashboard, err)
 			continue
 		}
 
@@ -306,9 +311,9 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 
 		// Process the dashboard. Use the known hash of an existing dashboard
 		// to determine if an update is required
-		knownHash := findHash(knownDashboards, &namespaceDashboards.Items[i])
-		knownUid := findUid(knownDashboards, &namespaceDashboards.Items[i])
-		pipeline := NewDashboardPipeline(r.Client, &namespaceDashboards.Items[i], r.context)
+		knownHash := findHash(knownDashboards, &dashboard)
+		knownUid := findUid(knownDashboards, &dashboard)
+		pipeline := NewDashboardPipeline(r.Client, &dashboard, r.context)
 		processed, err := pipeline.ProcessDashboard(knownHash, &folderId, folderName, false)
 
 		// Check known dashboards exist on grafana instance and recreate if not
@@ -316,37 +321,37 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 			response, err := grafanaClient.GetDashboard(knownUid)
 			if err != nil {
 				log.Log.V(4).Error(err, "Failed to search Grafana for dashboard")
-			} else {
+			} /*else {
 				continue
-			}
+			}*/
 
 			if *response.Dashboard.ID == uint(0) {
-				log.Log.V(1).Info(fmt.Sprintf("Dashboard %v has been deleted via grafana console. Recreating.", namespaceDashboards.Items[i].ObjectMeta.Name))
+				log.Log.V(1).Info(fmt.Sprintf("Dashboard %v (%s) has been deleted via grafana console. Recreating.", dashboard.ObjectMeta.Name, knownUid))
 				processed, err = pipeline.ProcessDashboard(knownHash, &folderId, folderName, true)
 
 				if err != nil {
 					log.Log.V(4).Error(err, "cannot process dashboard", "namespace", dashboard.Namespace, "name", dashboard.Name)
-					r.manageError(&namespaceDashboards.Items[i], err)
+					r.manageError(&dashboard, err)
 					continue
 				}
 			}
 		}
 
 		if err != nil {
-			log.Log.V(4).Error(err, "cannot process dashboard", "namespace", dashboard.Namespace, "name", dashboard.Name)
-			r.manageError(&namespaceDashboards.Items[i], err)
+			//log.Log.V(4).Error(err, "cannot process dashboard", "namespace", dashboard.Namespace, "name", dashboard.Name)
+			r.manageError(&dashboard, err)
 			continue
 		}
 
 		if processed == nil {
-			r.config.SetPluginsFor(&namespaceDashboards.Items[i])
+			r.config.SetPluginsFor(&dashboard)
 			continue
 		}
 		// Check labels only when DashboardNamespaceSelector isnt empty
 		if r.state.DashboardNamespaceSelector != nil {
-			matchesNamespaceLabels, err := r.checkNamespaceLabels(&namespaceDashboards.Items[i])
+			matchesNamespaceLabels, err := r.checkNamespaceLabels(&dashboard)
 			if err != nil {
-				r.manageError(&namespaceDashboards.Items[i], err)
+				r.manageError(&dashboard, err)
 				continue
 			}
 
@@ -359,12 +364,12 @@ func (r *GrafanaDashboardReconciler) reconcileDashboards(request reconcile.Reque
 		_, err = grafanaClient.CreateOrUpdateDashboard(processed, folderId, folderName)
 		if err != nil {
 			log.Log.V(1).Info(folderName)
-			r.manageError(&namespaceDashboards.Items[i], err)
+			r.manageError(&dashboard, err)
 
 			continue
 		}
 
-		r.manageSuccess(&namespaceDashboards.Items[i], &folderId, folderName, grafanaClient)
+		r.manageSuccess(&dashboard, &folderId, folderName, grafanaClient)
 	}
 
 	for _, dashboard := range dashboardsToDelete {
@@ -607,10 +612,10 @@ type projectClient struct {
 	ns         string
 }
 
-func CreateUserDashboard(ctx context.Context, namespace string, user string) (result *v1alpha1.GrafanaDashboard, err error) {
+func CreateUserDashboard(ctx context.Context, namespace string, user string, path string, opt string) (result *v1alpha1.GrafanaDashboard, err error) {
 
 	//	c := projectClient{}
-	nsByte, err := ioutil.ReadFile("/var/dashboard/nsdashboard.json")
+	nsByte, err := ioutil.ReadFile(path)
 	if err != nil {
 		return
 	}
@@ -620,7 +625,12 @@ func CreateUserDashboard(ctx context.Context, namespace string, user string) (re
 	v := grafanav1alpha1.GrafanaDashboard{}
 	v.APIVersion = "integreatly.org/v1alpha1"
 	v.ObjectMeta.Namespace = namespace
-	v.ObjectMeta.Name = "userdashboard-" + namespace
+	if opt == "ns" {
+		v.ObjectMeta.Name = "user-dashboard-" + namespace
+	} else {
+		v.ObjectMeta.Name = "user-dashboard-loki-" + namespace
+	}
+
 	v.Spec.Json = res
 	v.TypeMeta.Kind = "GrafanaDashboard"
 	label := map[string]string{}

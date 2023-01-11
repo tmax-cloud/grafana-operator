@@ -457,7 +457,7 @@ func GetGrafanaUser(email string) int {
 	return GrafanaUserGet.Id
 }
 
-func GetCRBAdmin() string {
+func GetCRBAdmin() []string {
 	//log.V(1).Info("getting crb")
 	var config *rest.Config
 	var err error
@@ -473,58 +473,68 @@ func GetCRBAdmin() string {
 		log.V(4).Error(err, "no clusterrolebinding")
 	}
 
-	var adminemail string
+	var adminemail []string
 	for _, crb := range crbList.Items {
 		log.V(1).Info(crb.Name)
-		if crb.Name == "admin" {
+		/*if crb.Name == "admin" {
 			adminemail = crb.Subjects[0].Name
 			//log.V(1).Info("admin is " + adminemail)
 			break
+		}*/
+		if crb.RoleRef.Name == "cluster-admin" {
+			/*for _,em := range crb.Subjects{
+				adminemail = append(adminemail, em.Name)
+			}*/
+			adminemail = append(adminemail, crb.Subjects[0].Name)
+
 		}
 	}
 	return adminemail
 }
 
 func GiveAdmin() {
-	var hc_admin string
+	var hc_admin []string
 	hc_admin = GetCRBAdmin() //"hc-admin@tmax.co.kr"
 	//log.V(1).Info("Getting admin CRB")
 	//log.V(1).Info(hc_admin)
-	if GetGrafanaUser(hc_admin) == 0 && hc_admin != "" {
-		CreateGrafanaUser(hc_admin)
-		id := GetGrafanaUser(hc_admin)
-		adminBody := `{"isGrafanaAdmin": true}`
-		grafanaId, grafanaPw := "admin", "admin"
-		httpgeturl := "http://" + grafanaId + ":" + grafanaPw + "@" + constants.GrafanaMonitoringAddress + "api/admin/users/" + strconv.Itoa(id) + "/permissions"
+	for _, user := range hc_admin {
+		if GetGrafanaUser(user) == 0 && user != "" {
+			CreateGrafanaUser(user)
+			id := GetGrafanaUser(user)
+			adminBody := `{"isGrafanaAdmin": true}`
+			grafanaId, grafanaPw := "admin", "admin"
+			httpgeturl := "http://" + grafanaId + ":" + grafanaPw + "@" + constants.GrafanaMonitoringAddress + "api/admin/users/" + strconv.Itoa(id) + "/permissions"
 
-		request, _ := http.NewRequest("PUT", httpgeturl, bytes.NewBuffer([]byte(adminBody)))
+			request, _ := http.NewRequest("PUT", httpgeturl, bytes.NewBuffer([]byte(adminBody)))
 
-		request.Header.Set("Content-Type", "application/json; charset=UTF-8")
+			request.Header.Set("Content-Type", "application/json; charset=UTF-8")
 
-		client := &http.Client{}
-		response, err := client.Do(request)
-		if err != nil {
-			log.V(1).Error(err, "err")
+			client := &http.Client{}
+			response, err := client.Do(request)
+			if err != nil {
+				log.V(1).Error(err, "err")
 
-		} else {
-			defer response.Body.Close()
-		}
+			} else {
+				defer response.Body.Close()
+			}
 
-		//org permission
-		httpgeturlorg := "http://" + grafanaId + ":" + grafanaPw + "@" + constants.GrafanaMonitoringAddress + "api/orgs/1/users/" + strconv.Itoa(id)
-		adminorgBody := `{"role":"Admin"}`
-		request, _ = http.NewRequest("PATCH", httpgeturlorg, bytes.NewBuffer([]byte(adminorgBody)))
-		request.Header.Set("Content-Type", "application/json; charset=UTF-8")
-		//request.Header.Set("Authorization", util.GrafanaKey)
-		client2 := &http.Client{}
-		response, err = client2.Do(request)
-		if err != nil {
-			log.V(1).Error(err, "err")
+			//org permission
+			httpgeturlorg := "http://" + grafanaId + ":" + grafanaPw + "@" + constants.GrafanaMonitoringAddress + "api/orgs/1/users/" + strconv.Itoa(id)
+			adminorgBody := `{"role":"Admin"}`
+			request, _ = http.NewRequest("PATCH", httpgeturlorg, bytes.NewBuffer([]byte(adminorgBody)))
+			request.Header.Set("Content-Type", "application/json; charset=UTF-8")
+			//request.Header.Set("Authorization", util.GrafanaKey)
+			client2 := &http.Client{}
+			response, err = client2.Do(request)
+			if err != nil {
+				log.V(1).Error(err, "err")
 
-		} else {
-			defer response.Body.Close()
+			} else {
+				defer response.Body.Close()
+			}
 		}
 	}
+
 }
 
 func Grafanacheck(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {

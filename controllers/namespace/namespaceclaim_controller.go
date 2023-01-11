@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/grafana-operator/grafana-operator/v4/controllers/common"
@@ -78,7 +79,9 @@ func (r *NamespaceReconciler) Reconcile(_ context.Context, req ctrl.Request) (ct
 			ns_owner = "kubernetes-admin"
 		}
 	}
-
+	if !strings.Contains(ns_owner, "@") {
+		ns_owner = ns_owner + "@localhost"
+	}
 	model.GrafanaKey = grafana.GetGrafanaKey()
 	//	klog.V(4).Info(s)
 	/*defer func() {
@@ -89,7 +92,8 @@ func (r *NamespaceReconciler) Reconcile(_ context.Context, req ctrl.Request) (ct
 	}()*/
 	if ns_owner != "" {
 		logger.V(1).Info("user name is" + ns_owner)
-		grafanadashboard.CreateUserDashboard(context.TODO(), namespace.GetName(), ns_owner)
+		grafanadashboard.CreateUserDashboard(context.TODO(), namespace.GetName(), ns_owner, "/var/dashboard/nsdashboard.json", "ns")
+		grafanadashboard.CreateUserDashboard(context.TODO(), namespace.GetName(), ns_owner, "/var/dashboard/lokidashboard.json", "loki")
 	}
 
 	return ctrl.Result{}, nil

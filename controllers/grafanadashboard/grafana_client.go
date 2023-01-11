@@ -88,7 +88,7 @@ type GrafanaFolderResponse struct {
 type GrafanaClient interface {
 	CreateOrUpdateDashboard(dashboard []byte, folderId int64, folderName string) (GrafanaResponse, error)
 	DeleteDashboardByUID(UID string) (GrafanaResponse, error)
-	GetListDashboard() ([]GrafanaDashboardResponse, error)
+	GetListDashboard(namespace string) ([]GrafanaDashboardResponse, error)
 	CreateOrUpdateFolder(folderName string) (GrafanaFolderResponse, error)
 	DeleteFolder(folderID *int64) error
 	SafeToDelete(dashboards []*v1alpha1.GrafanaDashboardRef, folderID *int64) bool
@@ -123,7 +123,7 @@ func NewGrafanaClient(url, user, password string, transport *http.Transport, tim
 	}
 }
 
-func (r *GrafanaClientImpl) GetListDashboard() ([]GrafanaDashboardResponse, error) {
+func (r *GrafanaClientImpl) GetListDashboard(namespace string) ([]GrafanaDashboardResponse, error) {
 
 	rawURL := fmt.Sprintf(GetListDashboardUrl, r.url)
 	response := []GrafanaDashboardListGetResponse{}
