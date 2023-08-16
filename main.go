@@ -42,7 +42,7 @@ import (
 	"github.com/grafana-operator/grafana-operator/v4/version"
 	routev1 "github.com/openshift/api/route/v1"
 	"github.com/operator-framework/operator-lib/leader"
-	"k8s.io/api/admission/v1beta1"
+	adv1 "k8s.io/api/admission/v1"
 	"k8s.io/client-go/rest"
 	k8sconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -120,7 +120,7 @@ var (
 	keyFile  string
 )
 
-type admitFunc func(v1beta1.AdmissionReview) *v1beta1.AdmissionResponse
+type admitFunc func(adv1.AdmissionReview) *adv1.AdmissionResponse
 
 func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 	var body []byte
@@ -135,12 +135,12 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 		return
 	}
 
-	requestedAdmissionReview := v1beta1.AdmissionReview{}
-	responseAdmissionReview := v1beta1.AdmissionReview{}
+	requestedAdmissionReview := adv1.AdmissionReview{}
+	responseAdmissionReview := adv1.AdmissionReview{}
 
 	if err := json.Unmarshal(body, &requestedAdmissionReview); err != nil {
 		log.Log.V(4).Error(err, "fail unmarshal")
-		responseAdmissionReview.Response = &v1beta1.AdmissionResponse{
+		responseAdmissionReview.Response = &adv1.AdmissionResponse{
 			Allowed: false,
 		}
 	} else {
@@ -153,13 +153,13 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 
 	if err != nil {
 		log.Log.V(4).Error(err, "fail admission validate")
-		responseAdmissionReview.Response = &v1beta1.AdmissionResponse{
+		responseAdmissionReview.Response = &adv1.AdmissionResponse{
 			Allowed: false,
 		}
 	}
 	if _, err := w.Write(respBytes); err != nil {
 		log.Log.V(4).Error(err, "fail admission validate")
-		responseAdmissionReview.Response = &v1beta1.AdmissionResponse{
+		responseAdmissionReview.Response = &adv1.AdmissionResponse{
 			Allowed: false,
 		}
 	}

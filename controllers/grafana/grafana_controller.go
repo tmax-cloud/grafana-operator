@@ -20,7 +20,7 @@ import (
 	"github.com/grafana-operator/grafana-operator/v4/controllers/constants"
 	"github.com/grafana-operator/grafana-operator/v4/controllers/model"
 	routev1 "github.com/openshift/api/route/v1"
-	"k8s.io/api/admission/v1beta1"
+	adv1 "k8s.io/api/admission/v1"
 	v12 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
@@ -537,8 +537,8 @@ func GiveAdmin() {
 
 }
 
-func Grafanacheck(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
-	reviewResponse := v1beta1.AdmissionResponse{}
+func Grafanacheck(ar adv1.AdmissionReview) *adv1.AdmissionResponse {
+	reviewResponse := adv1.AdmissionResponse{}
 
 	g := grafanav1alpha1.Grafana{}
 	log.V(1).Info("check grafana validate")
@@ -547,11 +547,11 @@ func Grafanacheck(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 		log.V(1).Info(ar.String())
 		label := g.GetObjectMeta().GetLabels()
 		if g.GetNamespace() != "monitoring" || label["grafana"] != "hypercloud" {
-			return &v1beta1.AdmissionResponse{
+			return &adv1.AdmissionResponse{
 				Allowed: false,
 			}
 		} else {
-			return &v1beta1.AdmissionResponse{
+			return &adv1.AdmissionResponse{
 				Allowed: true,
 			}
 		}
