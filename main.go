@@ -148,7 +148,8 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 	}
 
 	responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
-
+	responseAdmissionReview.APIVersion = "admission.k8s.io/v1"
+	responseAdmissionReview.Kind = "AdmissionReview"
 	respBytes, err := json.Marshal(responseAdmissionReview)
 
 	if err != nil {

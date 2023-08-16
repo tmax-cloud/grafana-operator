@@ -559,3 +559,41 @@ func Grafanacheck(ar adv1.AdmissionReview) *adv1.AdmissionResponse {
 
 	return &reviewResponse
 }
+
+/*
+func Grafanacheck(ar adv1.AdmissionReview) *adv1.AdmissionResponse {
+	var response *adv1.AdmissionResponse
+
+	g := grafanav1alpha1.Grafana{}
+	log.V(1).Info("check grafana validate")
+
+	err := json.Unmarshal(ar.Request.Object.Raw, &g)
+	if err != nil {
+		log.Error(err, "Failed to unmarshal Grafana object")
+		return &adv1.AdmissionResponse{
+			UID:     ar.Request.UID,
+			Allowed: false,
+			Result: &metav1.Status{
+				Message: fmt.Sprintf("Failed to unmarshal Grafana object: %v", err),
+			},
+		}
+	}
+
+	label := g.GetObjectMeta().GetLabels()
+	if g.GetNamespace() != "monitoring" || label["grafana"] != "hypercloud" {
+		response = &adv1.AdmissionResponse{
+			UID:     ar.Request.UID,
+			Allowed: false,
+			Result: &metav1.Status{
+				Message: "Validation checks failed. Grafana object should be in the 'monitoring' namespace with label 'grafana=hypercloud'.",
+			},
+		}
+	} else {
+		response = &adv1.AdmissionResponse{
+			UID:     ar.Request.UID,
+			Allowed: true,
+		}
+	}
+
+	return response
+}*/
